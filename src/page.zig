@@ -91,8 +91,8 @@ pub fn Grow(comptime Layout: type, comptime Delete: type) type {
 
         fn init(self: *Self, page_size: usize) void {
             self.layout.init(page_size);
-            self.offset_pos = @intCast(self.layout.const_offsets().len - 1);
-            self.value_pos = HeaderSize;
+            self.offset_pos = @intCast(self.const_offsets().len - 1);
+            self.value_pos = 0;
         }
 
         fn bytes(self: *Self) []u8 {
@@ -229,8 +229,8 @@ test "FLayout + Grow" {
     };
     var page: *Layout = @alignCast(@ptrCast(&data));
     page.init(8);
-    try testing.expectEqual(7, data[0]);
-    try testing.expectEqual(2, data[1]);
+    try testing.expectEqual(5, data[0]);
+    try testing.expectEqual(0, data[1]);
     try testing.expectEqual(11, page.get(0)[0]);
     try testing.expectEqual(10, page.get(1)[0]);
 }
