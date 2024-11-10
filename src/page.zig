@@ -7,7 +7,7 @@ const std = @import("std");
 const testing = std.testing;
 const assert = std.debug.assert;
 
-pub fn FLayout(comptime offset: type, comptime capacity: usize) type {
+pub fn Fixed(comptime offset: type, comptime capacity: usize) type {
     comptime if (capacity % @sizeOf(offset) != 0)
         @compileError("Page size must be a multiple of the offset type size");
 
@@ -39,7 +39,7 @@ pub fn FLayout(comptime offset: type, comptime capacity: usize) type {
     };
 }
 
-pub fn VLayout(comptime offset: type) type {
+pub fn Variable(comptime offset: type) type {
     return packed struct {
         const Self = @This();
         const Ofs = offset;
@@ -73,7 +73,31 @@ pub fn VLayout(comptime offset: type) type {
     };
 }
 
-pub fn Grow(comptime Layout: type, comptime Delete: type) type {
+pub fn ControlTrackDeleted(comptime Ofs: type) type {
+    return packed struct {
+        const Self = @This();
+        free: Ofs,
+
+        fn init(self: *Self) void {
+            self.free = 0;
+        }
+
+        fn allocated(_: *Self, _: usize) void {}
+
+        fn deleted(self: *Self, size: usize) void {
+            self.free += @intCast(size);
+        }
+    };
+}
+
+const ControlNone = packed struct {
+    const Self = @This();
+    fn init(_: *Self) void {}
+    fn allocated(_: *Self, _: usize) void {}
+    fn deleted(_: *Self, _: usize) void {}
+};
+
+pub fn Mutable(comptime Layout: type, comptime Control: type) type {
     return packed struct {
         const Self = @This();
         const Ofs = Layout.Ofs;
@@ -87,7 +111,7 @@ pub fn Grow(comptime Layout: type, comptime Delete: type) type {
         layout: Layout,
         offset_pos: Layout.Ofs,
         value_pos: Layout.Ofs,
-        delete: Delete,
+        control: Control,
 
         fn init(self: *Self, page_size: usize) void {
             self.layout.init(page_size);
@@ -120,6 +144,7 @@ pub fn Grow(comptime Layout: type, comptime Delete: type) type {
             self.bytes()[self.offset_pos] = self.value_pos;
             self.value_pos += @intCast(size);
             self.offset_pos -= 1;
+            self.control.allocated(size);
             return result;
         }
 
@@ -132,12 +157,23 @@ pub fn Grow(comptime Layout: type, comptime Delete: type) type {
 pub fn Const(comptime Layout: type) type {
     return packed struct {
         const Self = @This();
+        const Ofs = Layout.Ofs;
+        const HeaderSize = @sizeOf(Self) - @sizeOf(Layout);
+        const SizeOfs = HeaderSize / @sizeOf(Ofs);
+
+        comptime {
+            assert(HeaderSize % @sizeOf(Ofs) == 0);
+        }
 
         layout: Layout,
         len: Layout.Ofs,
 
-        fn layout(self: *Self) *Layout {
-            return self.layout;
+        fn const_bytes(self: *const Self) []const u8 {
+            return self.layout.const_bytes()[HeaderSize..];
+        }
+
+        fn const_offsets(self: *const Self) []const Ofs {
+            return self.layout.const_offsets()[SizeOfs..];
         }
 
         // since we can't add data here: we only can copy data at creation time
@@ -179,7 +215,7 @@ pub fn Page(comptime Header: type) type {
 }
 
 test "FLayout u8" {
-    const Layout = Page(FLayout(u8, 8));
+    const Layout = Page(Fixed(u8, 8));
     const data = [_]u8{ 0, 7, 6, 0, 0, 0, 2, 1 };
     const page: *const Layout = @ptrCast(&data);
     try testing.expectEqual(7, page.get(0)[0]);
@@ -187,7 +223,7 @@ test "FLayout u8" {
 }
 
 test "FLayout u12" {
-    const Layout = Page(FLayout(u12, 8));
+    const Layout = Page(Fixed(u12, 8));
     const data = [_]u8{ 0, 7, 6, 0, 1, 0, 2, 0 };
     const page: *const Layout = @ptrCast(&data);
     try testing.expectEqual(6, page.get(0)[0]);
@@ -195,7 +231,7 @@ test "FLayout u12" {
 }
 
 test "FLayout u12 unaligned" {
-    const Layout = Page(FLayout(u12, 8));
+    const Layout = Page(Fixed(u12, 8));
     const data = [_]u8{ 255, 0, 7, 6, 0, 1, 0, 2, 0 };
     const page: *const Layout = @ptrCast(&data[1]);
     try testing.expectEqual(6, page.get(0)[0]);
@@ -203,7 +239,7 @@ test "FLayout u12 unaligned" {
 }
 
 test "VLayout u8" {
-    const Layout = Page(VLayout(u8));
+    const Layout = Page(Variable(u8));
     const data = [8]u8{ 8, 7, 6, 0, 0, 0, 1, 0 };
     const page: *const Layout = @alignCast(@ptrCast(&data));
     try testing.expectEqual(7, page.get(0)[0]);
@@ -216,7 +252,7 @@ test "VLayout u8" {
 }
 
 test "FLayout + Grow" {
-    const Layout = Page(Grow(FLayout(u8, 8), void));
+    const Layout = Page(Mutable(Fixed(u8, 8), ControlNone));
     var data = [_]u8{
         255, // offset
         255, // value
