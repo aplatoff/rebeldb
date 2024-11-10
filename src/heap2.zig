@@ -39,10 +39,12 @@ fn PairingHeap(comptime T: type, comptime compareFn: fn (a: T, b: T) Order) type
             return self.root == null;
         }
 
-        pub fn insert(self: *Self, value: T) !void {
+        // Modified insert function to return node reference
+        pub fn insert(self: *Self, value: T) !*Node {
             const newNode = try Node.init(self.allocator, value);
             self.root = mergeNodes(self.root, newNode);
             if (self.root) |r| r.parent = null;
+            return newNode;
         }
 
         pub fn findMin(self: *Self) ?T {
@@ -81,16 +83,18 @@ fn PairingHeap(comptime T: type, comptime compareFn: fn (a: T, b: T) Order) type
             if (a) |aa| {
                 if (b) |bb| {
                     if (compareFn(bb.value, aa.value) == Order.gt) {
+                        // Make bb a child of aa
                         bb.sibling = aa.child;
-                        if (bb.sibling) |s| s.parent = bb;
-                        aa.child = bb;
+                        if (bb.sibling) |s| s.parent = aa;
                         bb.parent = aa;
+                        aa.child = bb;
                         return a;
                     } else {
+                        // Make aa a child of bb
                         aa.sibling = bb.child;
-                        if (aa.sibling) |s| s.parent = aa;
-                        bb.child = aa;
+                        if (aa.sibling) |s| s.parent = bb;
                         aa.parent = bb;
+                        bb.child = aa;
                         return b;
                     }
                 } else {
@@ -108,7 +112,8 @@ fn PairingHeap(comptime T: type, comptime compareFn: fn (a: T, b: T) Order) type
                     first.sibling = null;
                     second.sibling = null;
                     const merged = mergeNodes(first, second);
-                    return mergeNodes(merged, self.mergePairs(remaining));
+                    const mergedWithRemaining = mergeNodes(merged, self.mergePairs(remaining));
+                    return mergedWithRemaining;
                 } else {
                     return first;
                 }
@@ -117,80 +122,156 @@ fn PairingHeap(comptime T: type, comptime compareFn: fn (a: T, b: T) Order) type
             }
         }
 
-        pub fn replace(self: *Self, old_value: T, new_value: T) !void {
-            const node = self.findNode(self.root, old_value);
-            if (node) |n| {
-                const order = compareFn(new_value, n.value);
-                n.value = new_value;
+        // Decrease the value of a node and adjust the heap
+        pub fn decreaseKey(self: *Self, node: *Node, new_value: T) !void {
+            if (compareFn(new_value, node.value) == Order.gt) {
+                return error.NewValueGreaterThanCurrent;
+            }
+            node.value = new_value;
 
-                if (order == Order.lt) {
-                    // New value is smaller, percolate up
-                    self.percolateUp(n);
-                } else if (order == Order.gt) {
-                    // New value is larger, percolate down
-                    percolateDown(n);
-                }
-            } else return error.ValueNotFound;
+            if (node.parent != null) {
+                // Cut the node from its current position and merge with root
+                cutNode(node);
+                self.root = mergeNodes(self.root, node);
+                if (self.root) |r| r.parent = null;
+            }
         }
 
-        fn percolateUp(self: *Self, node: *Node) void {
-            var current = node;
-            while (current.parent) |parent| {
-                if (compareFn(current.value, parent.value) == Order.lt) {
-                    // Swap values
-                    const temp = current.value;
-                    current.value = parent.value;
-                    parent.value = temp;
+        // Increase the value of a node and adjust the heap
+        pub fn increaseKey(self: *Self, node: *Node, new_value: T) !void {
+            if (compareFn(new_value, node.value) == Order.lt) {
+                return error.NewValueLessThanCurrent;
+            }
+            node.value = new_value;
+            // Percolate down the node to restore heap property
+            self.percolateDown(node);
+        }
 
-                    current = parent;
+        // Delete a specific node from the heap
+        pub fn deleteNode(self: *Self, node: *Node) !void {
+            try self.decreaseKey(node, node.value); // Ensure node is at the root
+            self.deleteMin();
+        }
+
+        fn cutNode(node: *Node) void {
+            // Remove node from its parent's child list
+            const parent = node.parent.?;
+            if (parent.child == node) {
+                parent.child = node.sibling;
+            } else {
+                var sibling = parent.child;
+                while (sibling) |sib| {
+                    if (sib.sibling == node) {
+                        sib.sibling = node.sibling;
+                        break;
+                    }
+                    sibling = sib.sibling;
+                }
+            }
+            if (node.sibling) |s| s.parent = node.parent;
+            node.parent = null;
+            node.sibling = null;
+        }
+
+        fn percolateDown(self: *Self, node: *Node) void {
+            var current = node;
+            while (current.child) |child| {
+                // Find the child with the smallest value
+                var minChild = child;
+                var nextSibling = child.sibling;
+                while (nextSibling) |sibling| {
+                    if (compareFn(sibling.value, minChild.value) == Order.lt) {
+                        minChild = sibling;
+                    }
+                    nextSibling = sibling.sibling;
+                }
+                if (compareFn(minChild.value, current.value) == Order.lt) {
+                    // Swap current node with minChild
+                    swapNodes(current, minChild);
+                    current = minChild;
                 } else {
                     break;
                 }
             }
+            // Update root if necessary
             if (current.parent == null) {
                 self.root = current;
             }
         }
 
-        fn percolateDown(node: *Node) void {
-            var current = node;
-            while (true) {
-                var smallest = current;
-                if (current.child != null) {
-                    var c = current.child;
-                    while (c) |sibling| {
-                        if (compareFn(sibling.value, smallest.value) == Order.lt) {
-                            smallest = sibling;
-                        }
-                        c = sibling.sibling;
-                    }
-                }
+        fn swapNodes(node1: *Node, node2: *Node) void {
+            // Swap the positions of node1 and node2 in the heap
+            // Adjust parent, child, and sibling pointers
+            // Note: This is more complex due to the tree structure
 
-                if (smallest != current) {
-                    const temp = current.value;
-                    current.value = smallest.value;
-                    smallest.value = temp;
+            // Swap parents
+            const tempParent = node1.parent;
+            node1.parent = node2.parent;
+            node2.parent = tempParent;
 
-                    current = smallest;
+            // Swap children
+            const tempChild = node1.child;
+            node1.child = node2.child;
+            node2.child = tempChild;
+
+            // Swap siblings
+            const tempSibling = node1.sibling;
+            node1.sibling = node2.sibling;
+            node2.sibling = tempSibling;
+
+            // Update parents' child pointers
+            if (node1.parent) |parent| {
+                if (parent.child == node2) {
+                    parent.child = node1;
                 } else {
-                    break;
+                    var sibling = parent.child;
+                    while (sibling) |sib| {
+                        if (sib.sibling == node2) {
+                            sib.sibling = node1;
+                            break;
+                        }
+                        sibling = sib.sibling;
+                    }
                 }
             }
-        }
-
-        fn findNode(self: *Self, node: ?*Node, value: T) ?*Node {
-            if (node) |n| {
-                if (compareFn(n.value, value) == Order.eq) {
-                    return n;
+            if (node2.parent) |parent| {
+                if (parent.child == node1) {
+                    parent.child = node2;
                 } else {
-                    const foundInChild = self.findNode(n.child, value);
-                    if (foundInChild) |found| {
-                        return found;
-                    } else {
-                        return self.findNode(n.sibling, value);
+                    var sibling = parent.child;
+                    while (sibling) |sib| {
+                        if (sib.sibling == node1) {
+                            sib.sibling = node2;
+                            break;
+                        }
+                        sibling = sib.sibling;
                     }
                 }
-            } else return null;
+            }
+
+            // Update children's parent pointers
+            if (node1.child != null) {
+                var c = node1.child;
+                while (c) |childNode| {
+                    childNode.parent = node1;
+                    c = childNode.sibling;
+                }
+            }
+            if (node2.child != null) {
+                var c = node2.child;
+                while (c) |childNode| {
+                    childNode.parent = node2;
+                    c = childNode.sibling;
+                }
+            }
+
+            // Update siblings' sibling pointers
+            if (node1.sibling) |sib| {
+                sib.parent = node1.parent;
+            }
+            if (node2.sibling) |sib| {
+                sib.parent = node2.parent;
+            }
         }
     };
 }
@@ -205,32 +286,42 @@ fn cmp(a: i32, b: i32) Order {
     }
 }
 
-test "PairingHeap" {
+test "PairingHeap with decreaseKey, increaseKey, and deleteNode" {
     const Heap = PairingHeap(i32, cmp);
     var heap = Heap.init(testing.allocator);
     defer heap.deinit();
 
-    try heap.insert(10);
-    try heap.insert(5);
-    try heap.insert(20);
-    try heap.insert(3);
-    std.debug.print("Min value: {any}\n", .{heap.findMin()});
+    // Insert values and keep node references
+    const node10 = try heap.insert(10);
+    const node5 = try heap.insert(5);
+    const node20 = try heap.insert(20);
+    _ = try heap.insert(3);
+    _ = try heap.insert(15);
+    std.debug.print("Min value: {}\n", .{heap.findMin().?});
 
     heap.deleteMin();
-    std.debug.print("Min value after deleteMin: {any}\n", .{heap.findMin()});
+    std.debug.print("Min value after deleteMin: {}\n", .{heap.findMin().?});
 
-    // Update value
-    try heap.replace(5, 8);
-    std.debug.print("Min value after replacing 5 with 8: {any}\n", .{heap.findMin()});
+    // Decrease key of node20 from 20 to 2
+    try heap.decreaseKey(node20, 2);
+    std.debug.print("Min value after decreasing key of 20 to 2: {}\n", .{heap.findMin().?});
+
+    // Increase key of node5 from 5 to 25
+    try heap.increaseKey(node5, 25);
+    std.debug.print("Min value after increasing key of 5 to 25: {}\n", .{heap.findMin().?});
+
+    // Delete node10
+    try heap.deleteNode(node10);
+    std.debug.print("Min value after deleting node with value 10: {}\n", .{heap.findMin().?});
 
     // Merging example
     var heap1 = Heap.init(testing.allocator);
     defer heap1.deinit();
 
-    try heap1.insert(15);
-    try heap1.insert(7);
+    _ = try heap1.insert(7);
+    _ = try heap1.insert(1);
 
     heap.merge(&heap1);
 
-    std.debug.print("Min value after merging: {any}\n", .{heap.findMin()});
+    std.debug.print("Min value after merging: {}\n", .{heap.findMin().?});
 }
