@@ -54,6 +54,17 @@ pub const PageManager = struct {
         self.heap.deinit();
     }
 
+    fn memUsage(self: *Self) void {
+        var it = self.heap.iterator();
+        var allocated: usize = 0;
+        var free: usize = 0;
+        while (it.next()) |space| {
+            allocated += PageSize - 3 * @sizeOf(Offset);
+            free += space.free;
+        }
+        std.debug.print("allocated: {d} bytes\nfree: {d} bytes\n", .{ allocated, free });
+    }
+
     fn allocInPlace(self: *Self, page: *Page, id: PageId, available: usize, size: usize) !Address {
         assert(size <= available);
         try self.heap.add(FreeSpace{
@@ -90,6 +101,7 @@ test "init" {
     std.debug.print("bytes: {any}\n", .{bytes1});
     const bytes2 = manager.alloc(55);
     std.debug.print("bytes: {any}\n", .{bytes2});
+    manager.memUsage();
     // var allocator = &manager.createAllocator();
     // const page = try allocator.alloc();
     // try testing.expectEqual(0, page);

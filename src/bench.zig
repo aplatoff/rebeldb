@@ -5,7 +5,7 @@
 const std = @import("std");
 const zbench = @import("zbench");
 
-const PairingHeap = @import("heap.zig").PairingHeap;
+const PairingHeap = @import("heap2.zig").PairingHeap;
 const Allocator = std.mem.Allocator;
 
 fn cmp(a: i32, b: i32) std.math.Order {
@@ -30,6 +30,7 @@ pub fn main() !void {
     try suite.add("Insert Small", benchInsertSmall, .{});
     try suite.add("Insert Medium", benchInsertMedium, .{});
     try suite.add("Insert Large", benchInsertLarge, .{});
+    try suite.add("Insert Large Zig PQ", benchInsertLargePQ, .{});
     try suite.add("DeleteMin Small", benchDeleteMinSmall, .{});
     try suite.add("DeleteMin Medium", benchDeleteMinMedium, .{});
     try suite.add("Merge Small", benchMergeSmall, .{});
@@ -74,6 +75,16 @@ fn benchInsertLarge(allocator: std.mem.Allocator) void {
     var i: i32 = 0;
     while (i < LARGE_SIZE) : (i += 1) {
         heap.insert(i) catch unreachable;
+    }
+}
+
+fn benchInsertLargePQ(allocator: std.mem.Allocator) void {
+    var heap = std.PriorityQueue(i32, void, cmpPQ).init(allocator, {});
+    defer heap.deinit();
+
+    var i: i32 = 0;
+    while (i < LARGE_SIZE) : (i += 1) {
+        heap.add(i) catch unreachable;
     }
 }
 
