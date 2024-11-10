@@ -77,21 +77,21 @@ pub fn PairingHeap(comptime T: type, comptime compareFn: fn (a: T, b: T) Order) 
         }
 
         fn mergeNodes(a: ?*Node, b: ?*Node) ?*Node {
-            if (a) |aa|
-                if (b) |bb|
-                    if (compareFn(bb.value, aa.value) == Order.gt) {
-                        bb.sibling = aa.child;
-                        aa.child = bb;
-                        return a;
-                    } else {
-                        aa.sibling = bb.child;
-                        bb.child = aa;
-                        return b;
-                    }
-                else
-                    return a
-            else
+            if (a == null) return b;
+            if (b == null) return a;
+
+            const aa = a.?;
+            const bb = b.?;
+
+            if (compareFn(bb.value, aa.value) == Order.gt) {
+                bb.sibling = aa.child;
+                aa.child = bb;
+                return a;
+            } else {
+                aa.sibling = bb.child;
+                bb.child = aa;
                 return b;
+            }
         }
 
         fn mergePairs(self: *Self, node: ?*Node) ?*Node {
