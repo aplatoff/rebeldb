@@ -78,8 +78,8 @@ pub fn ControlTrackDeleted(comptime Ofs: type) type {
         const Self = @This();
         free: Ofs,
 
-        fn init(self: *Self) void {
-            self.free = 0;
+        fn init() Self {
+            return Self{ .free = 0 };
         }
 
         fn allocated(_: *Self, _: usize) void {}
@@ -97,10 +97,12 @@ const ControlNone = packed struct {
     fn deleted(_: *Self, _: usize) void {}
 };
 
-pub fn Mutable(comptime Layout: type, comptime Control: type) type {
+pub fn Mutable(comptime Layout: type, comptime Ctrl: type) type {
     return packed struct {
         const Self = @This();
         const Ofs = Layout.Ofs;
+        const Control = Ctrl;
+
         const HeaderSize = @sizeOf(Self) - @sizeOf(Layout);
         const SizeOfs = HeaderSize / @sizeOf(Ofs);
 
@@ -113,10 +115,11 @@ pub fn Mutable(comptime Layout: type, comptime Control: type) type {
         value_pos: Layout.Ofs,
         control: Control,
 
-        fn init(self: *Self, page_size: usize) void {
+        fn init(self: *Self, page_size: usize, control: Control) void {
             self.layout.init(page_size);
             self.offset_pos = @intCast(self.const_offsets().len - 1);
             self.value_pos = 0;
+            self.control = control;
         }
 
         fn bytes(self: *Self) []u8 {
@@ -177,7 +180,7 @@ pub fn Const(comptime Layout: type) type {
         }
 
         // since we can't add data here: we only can copy data at creation time
-        fn init(_: *Self, _: usize, _: usize) void {
+        fn init(_: *Self, _: usize, _: usize, _: ControlNone) void {
             unreachable;
         }
 
@@ -198,11 +201,12 @@ pub fn Const(comptime Layout: type) type {
 pub fn Page(comptime Header: type) type {
     return packed struct {
         const Self = @This();
+        const Control = Header.Control;
 
         header: Header,
 
-        fn init(self: *Self, size: usize) void {
-            self.header.init(size);
+        fn init(self: *Self, size: usize, control: Control) void {
+            self.header.init(size, control);
         }
 
         fn get(self: *const Self, index: usize) [*]const u8 {
@@ -214,7 +218,7 @@ pub fn Page(comptime Header: type) type {
     };
 }
 
-test "FLayout u8" {
+test "Fixed u8" {
     const Layout = Page(Fixed(u8, 8));
     const data = [_]u8{ 0, 7, 6, 0, 0, 0, 2, 1 };
     const page: *const Layout = @ptrCast(&data);
@@ -222,7 +226,7 @@ test "FLayout u8" {
     try testing.expectEqual(6, page.get(1)[0]);
 }
 
-test "FLayout u12" {
+test "Fixed u12" {
     const Layout = Page(Fixed(u12, 8));
     const data = [_]u8{ 0, 7, 6, 0, 1, 0, 2, 0 };
     const page: *const Layout = @ptrCast(&data);
@@ -230,7 +234,7 @@ test "FLayout u12" {
     try testing.expectEqual(7, page.get(1)[0]);
 }
 
-test "FLayout u12 unaligned" {
+test "Fixed u12 unaligned" {
     const Layout = Page(Fixed(u12, 8));
     const data = [_]u8{ 255, 0, 7, 6, 0, 1, 0, 2, 0 };
     const page: *const Layout = @ptrCast(&data[1]);
@@ -238,7 +242,7 @@ test "FLayout u12 unaligned" {
     try testing.expectEqual(7, page.get(1)[0]);
 }
 
-test "VLayout u8" {
+test "Variable u8" {
     const Layout = Page(Variable(u8));
     const data = [8]u8{ 8, 7, 6, 0, 0, 0, 1, 0 };
     const page: *const Layout = @alignCast(@ptrCast(&data));
@@ -251,7 +255,7 @@ test "VLayout u8" {
     try testing.expectEqual(7, page2.get(1)[0]);
 }
 
-test "FLayout + Grow" {
+test "Fixed + Mutable u8" {
     const Layout = Page(Mutable(Fixed(u8, 8), ControlNone));
     var data = [_]u8{
         255, // offset
@@ -264,7 +268,7 @@ test "FLayout + Grow" {
         1,
     };
     var page: *Layout = @alignCast(@ptrCast(&data));
-    page.init(8);
+    page.init(8, ControlNone{});
     try testing.expectEqual(5, data[0]);
     try testing.expectEqual(0, data[1]);
     try testing.expectEqual(11, page.get(0)[0]);
