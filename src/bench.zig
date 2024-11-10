@@ -4,7 +4,9 @@
 
 const std = @import("std");
 const zbench = @import("zbench");
+
 const PairingHeap = @import("heap.zig").PairingHeap;
+const Allocator = std.mem.Allocator;
 
 fn cmp(a: i32, b: i32) std.math.Order {
     return std.math.order(a, b);
@@ -35,6 +37,7 @@ pub fn main() !void {
     try suite.add("Sorted Insert", benchSortedInsert, .{});
     try suite.add("Reverse Sorted Insert", benchReverseSortedInsert, .{});
     try suite.add("Random Access Pattern", benchRandomAccess, .{});
+    try suite.add("Random Access Zig PQ", benchRandomAccessPQ, .{});
 
     const stdout = std.io.getStdOut().writer();
     try suite.run(stdout);
@@ -190,5 +193,30 @@ fn benchRandomAccess(allocator: std.mem.Allocator) void {
         } else if (!heap.isEmpty()) {
             heap.deleteMin();
         }
+    }
+}
+
+fn cmpPQ(_: void, a: i32, b: i32) std.math.Order {
+    return std.math.order(a, b);
+}
+
+fn benchRandomAccessPQ(allocator: Allocator) void {
+    var heap = std.PriorityQueue(i32, void, cmpPQ).init(allocator, {});
+    defer heap.deinit();
+
+    var prng = std.rand.DefaultPrng.init(42);
+    const random = prng.random();
+
+    // First, insert random values
+    var i: usize = 0;
+    while (i < MEDIUM_SIZE) : (i += 1) {
+        heap.add(random.int(i32)) catch unreachable;
+    }
+
+    i = 0;
+    while (i < MEDIUM_SIZE) : (i += 1) {
+        if (random.boolean()) {
+            heap.add(random.int(i32)) catch unreachable;
+        } else _ = heap.removeOrNull();
     }
 }
