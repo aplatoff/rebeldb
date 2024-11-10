@@ -73,28 +73,11 @@ pub fn Variable(comptime offset: type) type {
     };
 }
 
-pub fn ControlTrackDeleted(comptime Ofs: type) type {
-    return packed struct {
-        const Self = @This();
-        free: Ofs,
-
-        fn init() Self {
-            return Self{ .free = 0 };
-        }
-
-        fn allocated(_: *Self, _: usize) void {}
-
-        fn deleted(self: *Self, size: usize) void {
-            self.free += @intCast(size);
-        }
-    };
-}
-
 const ControlNone = packed struct {
     const Self = @This();
-    fn init(_: *Self) void {}
+    fn initialized(_: *Self, _: usize) void {}
     fn allocated(_: *Self, _: usize) void {}
-    fn deleted(_: *Self, _: usize) void {}
+    fn deallocated(_: *Self, _: usize) void {}
 };
 
 pub fn Mutable(comptime Layout: type, comptime Ctrl: type) type {
@@ -120,6 +103,7 @@ pub fn Mutable(comptime Layout: type, comptime Ctrl: type) type {
             self.offset_pos = @intCast(self.const_offsets().len - 1);
             self.value_pos = 0;
             self.control = control;
+            self.control.initialized(self.offset_pos);
         }
 
         fn bytes(self: *Self) []u8 {
