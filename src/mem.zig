@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const pg = @import("page.zig");
+const heap = @import("heap2.zig");
 
 const Allocator = std.mem.Allocator;
 const Order = std.math.Order;
@@ -19,7 +20,7 @@ pub const PageManager = struct {
 
     const FreeSpace = struct { free: Offset, page: PageId };
 
-    fn cmp(_: void, a: FreeSpace, b: FreeSpace) Order {
+    fn cmp(a: FreeSpace, b: FreeSpace) Order {
         if (a.free < b.free) return Order.lt;
         if (a.free > b.free) return Order.gt;
         if (a.page < b.page) return Order.gt;
@@ -27,7 +28,7 @@ pub const PageManager = struct {
         return Order.eq;
     }
 
-    const Heap = std.PriorityQueue(FreeSpace, void, cmp);
+    const Heap = heap.PairingHeap(FreeSpace, cmp);
     heap: Heap,
 
     const Control = packed struct {
@@ -35,7 +36,7 @@ pub const PageManager = struct {
         page: PageId,
 
         fn initialized(self: *Self, size: usize) void {
-            self.heap.add(FreeSpace{ .free = size, .page = self.page });
+            self.heap.insert(FreeSpace{ .free = size, .page = self.page });
         }
         fn allocated(self: *Self, size: usize) void {
             self.heap.update()
