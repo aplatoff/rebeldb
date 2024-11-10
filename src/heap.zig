@@ -8,7 +8,7 @@ const testing = std.testing;
 const Allocator = std.mem.Allocator;
 const Order = std.math.Order;
 
-fn PairingHeap(comptime T: type, comptime compareFn: fn (a: T, b: T) Order) type {
+pub fn PairingHeap(comptime T: type, comptime compareFn: fn (a: T, b: T) Order) type {
     const Node = struct {
         const Self = @This();
         value: T,
