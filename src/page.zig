@@ -63,7 +63,6 @@ pub fn Mutable(comptime Layout: type, comptime Control: type) type {
         const Slice = Layout.Slice;
 
         const HeaderSize = @sizeOf(Self) - @sizeOf(Layout);
-        const HeaderSizeOfs = HeaderSize / @sizeOf(Ofs);
 
         comptime {
             assert(HeaderSize % @sizeOf(Ofs) == 0);
@@ -94,7 +93,7 @@ pub fn Mutable(comptime Layout: type, comptime Control: type) type {
 
         fn offsets(self: *Self) []Ofs {
             const ptr: [*]Ofs = @ptrCast(self);
-            return ptr[HeaderSizeOfs .. self.layout.cap() / @sizeOf(Ofs)];
+            return ptr[HeaderSize / @sizeOf(Ofs) .. self.layout.cap() / @sizeOf(Ofs)];
         }
 
         fn const_bytes(self: *const Self) []const u8 {
@@ -104,7 +103,7 @@ pub fn Mutable(comptime Layout: type, comptime Control: type) type {
 
         fn const_offsets(self: *const Self) []const Ofs {
             const ptr: [*]align(1) const Ofs = @ptrCast(self);
-            return ptr[HeaderSizeOfs .. self.layout.cap() / @sizeOf(Ofs)];
+            return ptr[HeaderSize / @sizeOf(Ofs) .. self.layout.cap() / @sizeOf(Ofs)];
         }
 
         fn len(self: *const Self) usize {
