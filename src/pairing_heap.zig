@@ -211,33 +211,324 @@ const testing = std.testing;
 const expect = testing.expect;
 const expectEqual = testing.expectEqual;
 
-fn cmp(context: void, a: i32, b: i32) Order {
+fn lessThan(context: void, a: u32, b: u32) Order {
     _ = context;
     return std.math.order(a, b);
 }
 
-test "PairingHeap - Basic Operations" {
-    const Heap = PairingHeap(i32, void, cmp);
-    var heap = Heap.init(testing.allocator, {});
+fn greaterThan(context: void, a: u32, b: u32) Order {
+    return lessThan(context, a, b).invert();
+}
+
+const PHlt = PairingHeap(u32, void, lessThan);
+const PHgt = PairingHeap(u32, void, greaterThan);
+
+test "PairingHeap - add and remove min heap" {
+    var heap = PHlt.init(testing.allocator, {});
+    defer heap.deinit();
+
+    try heap.add(54);
+    try heap.add(12);
+    try heap.add(7);
+    try heap.add(23);
+    try heap.add(25);
+    try heap.add(13);
+    try expectEqual(@as(u32, 7), heap.removeOrNull().?);
+    try expectEqual(@as(u32, 12), heap.removeOrNull().?);
+    try expectEqual(@as(u32, 13), heap.removeOrNull().?);
+    try expectEqual(@as(u32, 23), heap.removeOrNull().?);
+    try expectEqual(@as(u32, 25), heap.removeOrNull().?);
+    try expectEqual(@as(u32, 54), heap.removeOrNull().?);
+}
+
+test "PairingHeap - add and remove same min heap" {
+    var heap = PHlt.init(testing.allocator, {});
+    defer heap.deinit();
+
+    try heap.add(1);
+    try heap.add(1);
+    try heap.add(2);
+    try heap.add(2);
+    try heap.add(1);
+    try heap.add(1);
+    try expectEqual(@as(u32, 1), heap.removeOrNull().?);
+    try expectEqual(@as(u32, 1), heap.removeOrNull().?);
+    try expectEqual(@as(u32, 1), heap.removeOrNull().?);
+    try expectEqual(@as(u32, 1), heap.removeOrNull().?);
+    try expectEqual(@as(u32, 2), heap.removeOrNull().?);
+    try expectEqual(@as(u32, 2), heap.removeOrNull().?);
+}
+
+test "PairingHeap - removeOrNull on empty" {
+    var heap = PHlt.init(testing.allocator, {});
+    defer heap.deinit();
+
+    try expect(heap.removeOrNull() == null);
+}
+
+test "PairingHeap - edge case 3 elements" {
+    var heap = PHlt.init(testing.allocator, {});
+    defer heap.deinit();
+
+    try heap.add(9);
+    try heap.add(3);
+    try heap.add(2);
+    try expectEqual(@as(u32, 2), heap.removeOrNull().?);
+    try expectEqual(@as(u32, 3), heap.removeOrNull().?);
+    try expectEqual(@as(u32, 9), heap.removeOrNull().?);
+}
+
+test "PairingHeap - peek" {
+    var heap = PHlt.init(testing.allocator, {});
     defer heap.deinit();
 
     try expect(heap.peek() == null);
+    try heap.add(9);
+    try heap.add(3);
+    try heap.add(2);
+    try expectEqual(@as(u32, 2), heap.peek().?);
+    try expectEqual(@as(u32, 2), heap.peek().?);
+}
+
+test "PairingHeap - addSlice" {
+    var heap = PHlt.init(testing.allocator, {});
+    defer heap.deinit();
+    const items = [_]u32{ 15, 7, 21, 14, 13, 22, 12, 6, 7, 25, 5, 24, 11, 16, 15, 24, 2, 1 };
+
+    // Since PairingHeap doesn't have addSlice, we need to add items individually
+    for (items) |item| {
+        try heap.add(item);
+    }
+
+    const sorted_items = [_]u32{ 1, 2, 5, 6, 7, 7, 11, 12, 13, 14, 15, 15, 16, 21, 22, 24, 24, 25 };
+    for (sorted_items) |expected| {
+        try expectEqual(expected, heap.removeOrNull().?);
+    }
+}
+
+test "PairingHeap - add and remove max heap" {
+    var heap = PHgt.init(testing.allocator, {});
+    defer heap.deinit();
+
+    try heap.add(54);
+    try heap.add(12);
+    try heap.add(7);
+    try heap.add(23);
+    try heap.add(25);
+    try heap.add(13);
+    try expectEqual(@as(u32, 54), heap.removeOrNull().?);
+    try expectEqual(@as(u32, 25), heap.removeOrNull().?);
+    try expectEqual(@as(u32, 23), heap.removeOrNull().?);
+    try expectEqual(@as(u32, 13), heap.removeOrNull().?);
+    try expectEqual(@as(u32, 12), heap.removeOrNull().?);
+    try expectEqual(@as(u32, 7), heap.removeOrNull().?);
+}
+
+test "PairingHeap - add and remove same max heap" {
+    var heap = PHgt.init(testing.allocator, {});
+    defer heap.deinit();
+
+    try heap.add(1);
+    try heap.add(1);
+    try heap.add(2);
+    try heap.add(2);
+    try heap.add(1);
+    try heap.add(1);
+    try expectEqual(@as(u32, 2), heap.removeOrNull().?);
+    try expectEqual(@as(u32, 2), heap.removeOrNull().?);
+    try expectEqual(@as(u32, 1), heap.removeOrNull().?);
+    try expectEqual(@as(u32, 1), heap.removeOrNull().?);
+    try expectEqual(@as(u32, 1), heap.removeOrNull().?);
+    try expectEqual(@as(u32, 1), heap.removeOrNull().?);
+}
+
+test "PairingHeap - remove all elements and check empty" {
+    var heap = PHlt.init(testing.allocator, {});
+    defer heap.deinit();
 
     try heap.add(10);
-    try expectEqual(heap.peek().?, 10);
+    try heap.add(20);
+    try heap.add(30);
 
-    try heap.add(5);
-    try expectEqual(heap.peek().?, 5);
+    try expectEqual(@as(u32, 10), heap.removeOrNull().?);
+    try expectEqual(@as(u32, 20), heap.removeOrNull().?);
+    try expectEqual(@as(u32, 30), heap.removeOrNull().?);
+    try expect(heap.removeOrNull() == null);
+}
 
-    try heap.add(15);
-    try expectEqual(heap.peek().?, 5);
+test "PairingHeap - ensureTotalCapacity" {
+    var heap = PHlt.init(testing.allocator, {});
+    defer heap.deinit();
 
-    try expectEqual(heap.removeOrNull().?, 5);
-    try expectEqual(heap.peek().?, 10);
+    try heap.ensureTotalCapacity(100);
+    try expect(heap.capacity() >= 100);
+}
 
-    try expectEqual(heap.removeOrNull().?, 10);
-    try expectEqual(heap.peek().?, 15);
+test "PairingHeap - count and capacity" {
+    var heap = PHlt.init(testing.allocator, {});
+    defer heap.deinit();
 
-    try expectEqual(heap.removeOrNull().?, 15);
+    try expectEqual(@as(usize, 0), heap.count());
+    try heap.add(1);
+    try heap.add(2);
+    try expectEqual(@as(usize, 2), heap.count());
+
+    // The capacity might be greater than or equal to count
+    try expect(heap.capacity() >= heap.count());
+}
+
+test "PairingHeap - peek after remove" {
+    var heap = PHlt.init(testing.allocator, {});
+    defer heap.deinit();
+
+    try heap.add(2);
+    try heap.add(1);
+    try expectEqual(@as(u32, 1), heap.peek().?);
+    try expectEqual(@as(u32, 1), heap.removeOrNull().?);
+    try expectEqual(@as(u32, 2), heap.peek().?);
+    try expectEqual(@as(u32, 2), heap.removeOrNull().?);
     try expect(heap.peek() == null);
+}
+
+fn contextLessThan(context: []const u32, a: usize, b: usize) Order {
+    return std.math.order(context[a], context[b]);
+}
+
+test "PairingHeap - contextful comparator" {
+    const context = [_]u32{ 5, 3, 4, 2, 2, 8, 0 };
+
+    const CPHlt = PairingHeap(usize, []const u32, contextLessThan);
+
+    var heap = CPHlt.init(testing.allocator, context[0..]);
+    defer heap.deinit();
+
+    try heap.add(0);
+    try heap.add(1);
+    try heap.add(2);
+    try heap.add(3);
+    try heap.add(4);
+    try heap.add(5);
+    try heap.add(6);
+    try expectEqual(@as(usize, 6), heap.removeOrNull().?); // context[6] == 0
+    try expectEqual(@as(usize, 4), heap.removeOrNull().?); // context[4] == 2
+    try expectEqual(@as(usize, 3), heap.removeOrNull().?); // context[3] == 2
+    try expectEqual(@as(usize, 1), heap.removeOrNull().?); // context[1] == 3
+    try expectEqual(@as(usize, 2), heap.removeOrNull().?); // context[2] == 4
+    try expectEqual(@as(usize, 0), heap.removeOrNull().?); // context[0] == 5
+    try expectEqual(@as(usize, 5), heap.removeOrNull().?); // context[5] == 8
+}
+
+test "PairingHeap - large number of elements" {
+    var heap = PHlt.init(testing.allocator, {});
+    defer heap.deinit();
+
+    const num_elements = 1000;
+    var rand = std.rand.DefaultPrng.init(0);
+
+    var tracker = std.AutoHashMap(u32, void).init(testing.allocator);
+    defer tracker.deinit();
+
+    // Add random elements
+    for (num_elements) |_| {
+        const value = rand.random().uintLessThan(u32, 10000);
+        try heap.add(value);
+        try tracker.put(value, {});
+    }
+
+    var last_value: u32 = 0;
+    while (heap.removeOrNull()) |value| {
+        // Ensure min-heap property
+        try expect(value >= last_value);
+        last_value = value;
+        _ = tracker.remove(value);
+    }
+
+    // Ensure all elements were removed
+    try expectEqual(@as(usize, 0), tracker.count());
+}
+
+const Item = struct {
+    key: u32,
+    value: []const u8,
+};
+
+fn itemLessThan(context: void, a: Item, b: Item) Order {
+    _ = context;
+    return std.math.order(a.key, b.key);
+}
+
+test "PairingHeap - custom struct elements" {
+    const ItemHeap = PairingHeap(Item, void, itemLessThan);
+
+    var heap = ItemHeap.init(testing.allocator, {});
+    defer heap.deinit();
+
+    const items = [_]Item{
+        .{ .key = 5, .value = "five" },
+        .{ .key = 2, .value = "two" },
+        .{ .key = 8, .value = "eight" },
+        .{ .key = 1, .value = "one" },
+        .{ .key = 3, .value = "three" },
+    };
+
+    for (items) |item| {
+        try heap.add(item);
+    }
+
+    const expected_order = [_][]const u8{ "one", "two", "three", "five", "eight" };
+    for (expected_order) |expected_value| {
+        const item = heap.removeOrNull().?;
+        try expectEqualStrings(expected_value, item.value);
+    }
+}
+
+fn expectEqualStrings(expected: []const u8, actual: []const u8) !void {
+    if (!std.mem.eql(u8, expected, actual)) {
+        return error.TestFailure;
+    }
+}
+
+test "PairingHeap - remove all elements and check count" {
+    var heap = PHlt.init(testing.allocator, {});
+    defer heap.deinit();
+
+    const items = [_]u32{ 10, 20, 30, 40, 50 };
+    for (items) |item| {
+        try heap.add(item);
+    }
+
+    try expectEqual(@as(usize, 5), heap.count());
+
+    while (heap.removeOrNull()) |value| {
+        _ = value;
+    }
+
+    try expectEqual(@as(usize, 0), heap.count());
+}
+
+test "PairingHeap - removeOrNull with manual free" {
+    var heap = PHlt.init(testing.allocator, {});
+    defer heap.deinit();
+
+    const items = [_]u32{ 10, 20, 30 };
+    for (items) |item| {
+        try heap.add(item);
+    }
+
+    try expectEqual(@as(u32, 10), heap.removeOrNull().?);
+    try expectEqual(@as(u32, 20), heap.removeOrNull().?);
+}
+
+test "PairingHeap - test ensureTotalCapacity and free" {
+    var heap = PHlt.init(testing.allocator, {});
+    defer heap.deinit();
+
+    try heap.ensureTotalCapacity(64);
+    try expect(heap.capacity() >= 64);
+
+    try heap.add(1);
+    try heap.add(2);
+    try expectEqual(@as(usize, 2), heap.count());
+
+    // Deinit should not crash
 }
