@@ -5,27 +5,32 @@ const Order = std.math.Order;
 const ArrayList = std.ArrayList;
 
 pub fn PairingHeap(comptime T: type, comptime compareFn: fn (a: T, b: T) Order) type {
-    // Special index values
-    const NULL_INDEX = std.math.maxInt(u32);
+    // Special index value for null references
+    const NULL_INDEX = std.math.maxInt(usize);
 
-    const Node = struct {
-        value: T,
-        child: u32, // Index of first child
-        sibling: u32, // Index of next sibling
-        is_active: bool, // Whether this node is in use
+    // Define Node as a union of ActiveNode and FreeNode
+    const Node = union(enum) {
+        ActiveNode: struct {
+            value: T,
+            child: usize, // Index of first child
+            sibling: usize, // Index of next sibling
+        },
+        FreeNode: struct {
+            next_free: usize, // Index of next free node
+        },
     };
 
     return struct {
         const Self = @This();
 
         nodes: ArrayList(Node),
-        root: u32, // Index of root node
-        free_list: u32, // Head of free list
+        root: usize, // Index of root node
+        free_list: usize, // Head of free list
         allocator: Allocator,
 
         pub fn init(allocator: Allocator) Self {
             return Self{
-                .nodes = ArrayList(Node).init(allocator),
+                .nodes = ArrayList(Node).initCapacity(allocator, 1024 * 1024) catch unreachable,
                 .root = NULL_INDEX,
                 .free_list = NULL_INDEX,
                 .allocator = allocator,
@@ -36,38 +41,43 @@ pub fn PairingHeap(comptime T: type, comptime compareFn: fn (a: T, b: T) Order) 
             self.nodes.deinit();
         }
 
-        fn allocNode(self: *Self, value: T) !u32 {
+        fn allocNode(self: *Self, value: T) !usize {
             // First try to reuse a node from the free list
             if (self.free_list != NULL_INDEX) {
                 const index = self.free_list;
-                const node = &self.nodes.items[index];
-                self.free_list = node.sibling;
-                node.* = Node{
-                    .value = value,
-                    .child = NULL_INDEX,
-                    .sibling = NULL_INDEX,
-                    .is_active = true,
+                const free_node = &self.nodes.items[index].FreeNode;
+                self.free_list = free_node.next_free;
+                self.nodes.items[index] = Node{
+                    .ActiveNode = .{
+                        .value = value,
+                        .child = NULL_INDEX,
+                        .sibling = NULL_INDEX,
+                    },
                 };
                 return index;
             }
 
             // If no free nodes, append a new one
-            const index = @as(u32, @intCast(self.nodes.items.len));
+            const index = self.nodes.items.len;
             try self.nodes.append(Node{
-                .value = value,
-                .child = NULL_INDEX,
-                .sibling = NULL_INDEX,
-                .is_active = true,
+                .ActiveNode = .{
+                    .value = value,
+                    .child = NULL_INDEX,
+                    .sibling = NULL_INDEX,
+                },
             });
             return index;
         }
 
-        fn freeNode(self: *Self, index: u32) void {
+        fn freeNode(self: *Self, index: usize) void {
             if (index == NULL_INDEX) return;
 
-            var node = &self.nodes.items[index];
-            node.is_active = false;
-            node.sibling = self.free_list;
+            // Overwrite the node with a FreeNode
+            self.nodes.items[index] = Node{
+                .FreeNode = .{
+                    .next_free = self.free_list,
+                },
+            };
             self.free_list = index;
         }
 
@@ -86,7 +96,7 @@ pub fn PairingHeap(comptime T: type, comptime compareFn: fn (a: T, b: T) Order) 
 
         pub fn findMin(self: *const Self) ?T {
             return if (self.root != NULL_INDEX)
-                self.nodes.items[self.root].value
+                self.nodes.items[self.root].ActiveNode.value
             else
                 null;
         }
@@ -95,14 +105,12 @@ pub fn PairingHeap(comptime T: type, comptime compareFn: fn (a: T, b: T) Order) 
             if (self.root == NULL_INDEX) return;
 
             const old_root = self.root;
-            const root_node = &self.nodes.items[old_root];
+            const root_node = &self.nodes.items[old_root].ActiveNode;
             const children = root_node.child;
 
-            // Clear the old root's pointers before freeing
-            root_node.child = NULL_INDEX;
-            root_node.sibling = NULL_INDEX;
-
             self.root = self.mergePairs(children);
+
+            // Free the old root node
             self.freeNode(old_root);
         }
 
@@ -128,34 +136,78 @@ pub fn PairingHeap(comptime T: type, comptime compareFn: fn (a: T, b: T) Order) 
             self.nodes.appendSlice(other.nodes.items) catch return;
 
             // Update indices in moved nodes
-            var i: u32 = 0;
+            var i: usize = 0;
             while (i < other.nodes.items.len) : (i += 1) {
-                const idx = @as(u32, @intCast(old_len + i));
-                var node = &self.nodes.items[idx];
-                if (node.child != NULL_INDEX) {
-                    node.child += @as(u32, @intCast(old_len));
-                }
-                if (node.sibling != NULL_INDEX) {
-                    node.sibling += @as(u32, @intCast(old_len));
+                const idx = old_len + i;
+
+                const node = &self.nodes.items[idx];
+                switch (node.*) {
+                    .ActiveNode => |*active_node| {
+                        if (active_node.child != NULL_INDEX) {
+                            active_node.child += old_len;
+                        }
+                        if (active_node.sibling != NULL_INDEX) {
+                            active_node.sibling += old_len;
+                        }
+                    },
+                    .FreeNode => |*free_node| {
+                        if (free_node.next_free != NULL_INDEX) {
+                            free_node.next_free += old_len;
+                        }
+                    },
                 }
             }
 
             // Update other's root index and merge roots
-            const other_root = other.root + @as(u32, @intCast(old_len));
+            const other_root = other.root + old_len;
             self.root = self.mergeNodes(self.root, other_root);
 
+            // Adjust free list indices
+            if (other.free_list != NULL_INDEX) {
+                const other_free_idx = other.free_list + old_len;
+                var current_free_idx = other_free_idx;
+
+                while (current_free_idx != NULL_INDEX) {
+                    const node = &self.nodes.items[current_free_idx];
+                    const free_node = &node.FreeNode;
+                    if (free_node.next_free != NULL_INDEX) {
+                        const next_free = free_node.next_free + old_len;
+                        self.nodes.items[current_free_idx] = Node{
+                            .FreeNode = .{ .next_free = next_free },
+                        };
+                        current_free_idx = next_free;
+                    } else {
+                        self.nodes.items[current_free_idx] = Node{
+                            .FreeNode = .{ .next_free = NULL_INDEX },
+                        };
+                        break;
+                    }
+                }
+
+                // Merge free lists
+                if (self.free_list != NULL_INDEX) {
+                    const last_other_free = current_free_idx;
+                    self.nodes.items[last_other_free] = Node{
+                        .FreeNode = .{ .next_free = self.free_list },
+                    };
+                    self.free_list = other_free_idx;
+                } else {
+                    self.free_list = other_free_idx;
+                }
+            }
+
             // Clear other heap
-            other.nodes.clearAndFree();
+            other.nodes = ArrayList(Node).init(other.allocator);
             other.root = NULL_INDEX;
             other.free_list = NULL_INDEX;
         }
 
-        fn mergeNodes(self: *Self, a: u32, b: u32) u32 {
+        fn mergeNodes(self: *Self, a: usize, b: usize) usize {
             if (a == NULL_INDEX) return b;
             if (b == NULL_INDEX) return a;
 
-            var node_a = &self.nodes.items[a];
-            var node_b = &self.nodes.items[b];
+            var node_a = &self.nodes.items[a].ActiveNode;
+            var node_b = &self.nodes.items[b].ActiveNode;
 
             if (compareFn(node_a.value, node_b.value) == Order.lt) {
                 // a becomes the root
@@ -170,14 +222,14 @@ pub fn PairingHeap(comptime T: type, comptime compareFn: fn (a: T, b: T) Order) 
             }
         }
 
-        fn mergePairs(self: *Self, first: u32) u32 {
+        fn mergePairs(self: *Self, first: usize) usize {
             if (first == NULL_INDEX) return NULL_INDEX;
 
-            const first_node = &self.nodes.items[first];
+            const first_node = &self.nodes.items[first].ActiveNode;
             const second = first_node.sibling;
             if (second == NULL_INDEX) return first;
 
-            const second_node = &self.nodes.items[second];
+            const second_node = &self.nodes.items[second].ActiveNode;
             const remaining = second_node.sibling;
 
             // Clear sibling pointers
@@ -192,6 +244,7 @@ pub fn PairingHeap(comptime T: type, comptime compareFn: fn (a: T, b: T) Order) 
     };
 }
 
+// ... (rest of your test code remains unchanged)
 const expect = testing.expect;
 const expectEqual = testing.expectEqual;
 
