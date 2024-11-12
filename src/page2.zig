@@ -129,8 +129,8 @@ fn Mutable(comptime Offset: type) type {
     return packed struct {
         const Self = @This();
         write: Offset,
-        fn init() Self {
-            return Self{ .write = 0 };
+        fn init(pos: Offset) Self {
+            return Self{ .write = pos };
         }
         fn position(self: Self) Offset {
             return self.write;
@@ -145,7 +145,7 @@ fn Mutable(comptime Offset: type) type {
 //  Delete support.
 //
 
-fn NoDelete(comptime Offset: type) type {
+fn WithoutDelete(comptime Offset: type) type {
     return packed struct {
         const Self = @This();
 
@@ -153,40 +153,41 @@ fn NoDelete(comptime Offset: type) type {
             return Self{};
         }
 
-        fn delete(_: Offset) Self {
+        fn deleted(_: Offset) Self {
             unreachable;
         }
 
         fn reclaimable(_: Self) Offset {
             return 0;
         }
+
+        fn size(_: [*]const u8) Offset {
+            unreachable;
+        }
     };
 }
 
-fn Delete(comptime Offset: type) type {
+fn WithDelete(comptime Offset: type, comptime size_fn: fn (value: [*]const u8) Offset) type {
     return packed struct {
         const Self = @This();
+        deleted_bytes: Offset,
 
-        fn init(_: usize) Self {
-            return Self{};
+        fn init() Self {
+            return Self{ .deleted_bytes = 0 };
         }
 
-        fn delete(_: Offset) Self {
-            unreachable;
+        fn deleted(self: Self, bytes: Offset) Self {
+            return Self{ .deleted_bytes = self.deleted_bytes + bytes };
         }
 
-        fn reclaimable(_: Self) Offset {
-            return 0;
+        fn reclaimable(self: Self) Offset {
+            return self.deleted_bytes;
+        }
+
+        fn size(value: [*]const u8) Offset {
+            return size_fn(value);
         }
     };
-}
-
-//
-//
-//
-
-fn noSizeSupport(comptime Offset: type, _: [*]const u8) Offset {
-    unreachable;
 }
 
 //
@@ -194,7 +195,7 @@ fn noSizeSupport(comptime Offset: type, _: [*]const u8) Offset {
 //
 
 /// Page
-fn Page(comptime LayoutType: type, comptime Write: type) type {
+fn Page(comptime LayoutType: type, comptime Write: type, comptime Delete: type) type {
     return packed struct {
         const Self = @This();
 
@@ -207,6 +208,15 @@ fn Page(comptime LayoutType: type, comptime Write: type) type {
         layout: Layout,
         len: Offset,
         write: Write,
+        delete: Delete,
+
+        fn init(self: *Self, size: usize) usize {
+            self.layout.init(size);
+            self.len = 0;
+            self.write = Write.init(0);
+            self.delete = Delete.init();
+            return self.immediatelyAvailable();
+        }
 
         // Read methods
 
@@ -220,7 +230,7 @@ fn Page(comptime LayoutType: type, comptime Write: type) type {
             return @ptrCast(&data[Layout.Align.getIndex(data, index)]);
         }
 
-        fn available(self: *const Self) usize {
+        fn immediatelyAvailable(self: *const Self) usize {
             return self.layout.cap() - header - Layout.Align.sizeOfIndexes(self.len) - self.write.position();
         }
 
@@ -231,14 +241,56 @@ fn Page(comptime LayoutType: type, comptime Write: type) type {
             return ptr[header..self.layout.cap()];
         }
 
-        fn add(self: *Self, value: [*]const u8, size: Offset) void {
-            assert(size <= self.available());
+        fn available(self: *const Self) usize {
+            return self.immediatelyAvailable() + self.delete.reclaimable();
+        }
+
+        fn ensureAvailable(self: *Self, size: usize) !void {
+            if (size <= self.immediatelyAvailable()) return;
+            if (size <= self.available()) {
+                self.compact();
+                assert(size <= self.immediatelyAvailable());
+            } else return error.OutOfMemory;
+        }
+
+        fn add(self: *Self, value: [*]const u8, size: Offset) !void {
+            try self.ensureAvailable(size);
             const buf = self.bytes();
             const pos = self.write.position();
             Layout.Align.setIndex(buf, self.len, pos);
             for (0..size) |i| buf[pos + i] = value[i];
             self.write = self.write.advance(size);
             self.len += 1;
+        }
+
+        fn compact(self: *Self) void {
+            const buf = self.bytes();
+            var new_offset: Offset = 0;
+            var i: Index = 0;
+            while (i < self.len) : (i += 1) {
+                const cur_offset = Layout.Align.getIndex(self.constBytes(), i);
+                const cur_value = &self.constBytes()[cur_offset];
+                const size = Delete.size(@ptrCast(cur_value));
+                if (new_offset == cur_offset)
+                    new_offset += size
+                else {
+                    assert(new_offset < cur_offset);
+                    for (0..size) |j| buf[new_offset + j] = buf[cur_offset + j];
+                    Layout.Align.setIndex(buf, i, new_offset);
+                }
+            }
+            assert(new_offset <= self.write.position());
+            self.write = Write.init(new_offset);
+        }
+
+        fn delete(self: *Self, index: Index) void {
+            assert(index < self.len());
+            const offsets = self.header.offsets();
+            self.offset_pos += 1;
+            var offset = offsets.len - 1 - index;
+            while (offset > self.offset_pos) : (offset -= 1)
+                offsets[offset] = offsets[offset - 1];
+            self.delete.deleted(self.get(index));
         }
     };
 }
@@ -274,7 +326,7 @@ test "Layout" {
 test "Read" {
     const data = [_]u8{ 3, 7, 6, 42, 0, 0, 2, 1 };
     const Cap8 = ByteAligned(8);
-    const page: *const Page(Fixed(Cap8), Const(Cap8.Offset)) = @ptrCast(&data);
+    const page: *const Page(Fixed(Cap8), Const(Cap8.Offset), WithoutDelete(Cap8.Offset)) = @ptrCast(&data);
     try testing.expectEqual(@as(u8, 6), page.get(0)[0]);
     try testing.expectEqual(@as(u8, 42), page.get(1)[0]);
 }
@@ -284,7 +336,7 @@ test "Write and Read Data" {
     const LayoutType = Fixed(Cap16);
     const WriteType = Mutable(Cap16.Offset);
 
-    const PageType = Page(LayoutType, WriteType);
+    const PageType = Page(LayoutType, WriteType, WithoutDelete(Cap16.Offset));
 
     var page_data = [_]u8{0} ** 256;
     var page: *PageType = @alignCast(@ptrCast(&page_data));
@@ -294,10 +346,10 @@ test "Write and Read Data" {
     const data2 = [_]u8{ 0xAA, 0xBB };
 
     // Write data1 to the page
-    page.add(@ptrCast(&data1[0]), data1.len);
+    try page.add(@ptrCast(&data1[0]), data1.len);
 
     // Write data2 to the page
-    page.add(@ptrCast(&data2[0]), data2.len);
+    try page.add(@ptrCast(&data2[0]), data2.len);
 
     // Read data back from the page
     const read_data1 = page.get(0)[0..data1.len];
