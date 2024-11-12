@@ -213,9 +213,7 @@ test "Read" {
 }
 
 test "Write and Read Data" {
-    const mem = std.mem;
-
-    const Cap16 = Capacity(256);
+    const Cap16 = Capacity(16);
     const LayoutType = Fixed(Cap16);
     const WriteType = Mutable(Cap16.Offset);
 
@@ -239,6 +237,6 @@ test "Write and Read Data" {
     const read_data2 = page.get(1)[0..data2.len];
 
     // Verify that the read data matches the written data
-    try testing.expect(mem.eql(u8, read_data1, &data1));
-    try testing.expect(mem.eql(u8, read_data2, &data2));
+    try testing.expect(std.mem.eql(u8, read_data1, &data1));
+    try testing.expect(std.mem.eql(u8, read_data2, &data2));
 }
