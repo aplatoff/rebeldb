@@ -24,7 +24,7 @@ fn createUnsigned(bitCount: u16) type {
 }
 
 /// Byte-level addressing and indexing support.
-fn ByteAligned(comptime capacity: comptime_int) type {
+pub fn ByteAligned(comptime capacity: comptime_int) type {
     const cap: usize = if (capacity == 0) 0 else capacity - 1;
     const bits_needed = @bitSizeOf(usize) - @clz(cap);
     assert(bits_needed <= 64);
@@ -34,7 +34,7 @@ fn ByteAligned(comptime capacity: comptime_int) type {
 
     return packed struct {
         const Capacity = capacity;
-        const Offset = OffsetType; // used to index any byte in the capacity space
+        pub const Offset = OffsetType; // used to index any byte in the capacity space
         const Index = OffsetType; // used to index any index in the capacity space
 
         fn constIndexes(buffer: []const u8) []const Offset {
@@ -45,7 +45,7 @@ fn ByteAligned(comptime capacity: comptime_int) type {
 
         fn indexes(buffer: []u8) []Offset {
             assert(buffer.len % @sizeOf(Index) == 0);
-            const idx: [*]Index = @ptrCast(&buffer[0]);
+            const idx: [*]Index = @alignCast(@ptrCast(&buffer[0]));
             return idx[0 .. buffer.len / @sizeOf(Index)];
         }
 
@@ -70,7 +70,7 @@ fn ByteAligned(comptime capacity: comptime_int) type {
 //
 
 // Page can grow to the capacity of the alignment type.
-fn Fixed(comptime AlignmentType: type) type {
+pub fn Fixed(comptime AlignmentType: type) type {
     return packed struct {
         const Self = @This();
         const Align = AlignmentType;
@@ -125,7 +125,7 @@ fn Const(comptime Offset: type) type {
     };
 }
 
-fn Mutable(comptime Offset: type) type {
+pub fn Mutable(comptime Offset: type) type {
     return packed struct {
         const Self = @This();
         write: Offset,
@@ -145,11 +145,11 @@ fn Mutable(comptime Offset: type) type {
 //  Delete support.
 //
 
-fn WithoutDelete(comptime Offset: type) type {
+pub fn WithoutDelete(comptime Offset: type) type {
     return packed struct {
         const Self = @This();
 
-        fn init(_: usize) Self {
+        fn init() Self {
             return Self{};
         }
 
@@ -195,7 +195,7 @@ fn WithDelete(comptime Offset: type, comptime size_fn: fn (value: [*]const u8) O
 //
 
 /// Page
-fn Page(comptime LayoutType: type, comptime Write: type, comptime Delete: type) type {
+pub fn Page(comptime LayoutType: type, comptime Write: type, comptime Delete: type) type {
     return packed struct {
         const Self = @This();
 
@@ -210,7 +210,7 @@ fn Page(comptime LayoutType: type, comptime Write: type, comptime Delete: type) 
         write: Write,
         delete_support: Delete,
 
-        fn init(self: *Self, size: usize) usize {
+        pub fn init(self: *Self, size: usize) usize {
             self.len = 0;
             self.layout = Layout.init(size);
             self.write = Write.init(0);
@@ -241,7 +241,7 @@ fn Page(comptime LayoutType: type, comptime Write: type, comptime Delete: type) 
             return ptr[header..self.layout.cap()];
         }
 
-        fn available(self: *const Self) usize {
+        pub fn available(self: *const Self) usize {
             return self.immediatelyAvailable() + self.delete_support.reclaimable();
         }
 
@@ -253,7 +253,7 @@ fn Page(comptime LayoutType: type, comptime Write: type, comptime Delete: type) 
             } else return error.OutOfMemory;
         }
 
-        fn add(self: *Self, value: [*]const u8, size: Offset) !void {
+        pub fn add(self: *Self, value: [*]const u8, size: Offset) !void {
             try self.ensureAvailable(size);
             const buf = self.bytes();
             const pos = self.write.position();

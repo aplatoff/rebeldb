@@ -1,143 +1,117 @@
 // bench.zig
 //
-// RebelDB™ © 2024 Huly Labs • https://hulylabs.com • SPDX-License-Identifier: MIT
+// RebelDB™ © 2024 Huly Labs • https://rebeldb.com • SPDX-License-Identifier: MIT
 //
 
 const std = @import("std");
 const zbench = @import("zbench");
-
-const PairingHeap = @import("pairing_heap.zig").PairingHeap;
-const PriorityQueue = std.PriorityQueue;
-const Allocator = std.mem.Allocator;
+const PageModule = @import("page2.zig");
 
 // Benchmark configurations
 const SMALL_SIZE = 100;
 const MEDIUM_SIZE = 10_000;
 const LARGE_SIZE = 1_000_000;
 
-// Comparison function for the heaps
-fn cmp(context: void, a: i32, b: i32) std.math.Order {
-    _ = context;
-    return std.math.order(a, b);
-}
+const PageSize = 4096;
+const Cap = PageModule.ByteAligned(PageSize);
+const LayoutType = PageModule.Fixed(Cap);
+const WriteType = PageModule.Mutable(Cap.Offset);
+const DeleteType = PageModule.WithoutDelete(Cap.Offset);
 
-// Generic benchmark function for insertion
-fn genBenchInsert(comptime HeapType: type, allocator: Allocator, size: usize) void {
-    var heap = HeapType.init(allocator, {});
-    defer heap.deinit();
+const PageType = PageModule.Page(LayoutType, WriteType, DeleteType);
 
-    for (0..size) |i| {
-        heap.add(@intCast(i)) catch unreachable;
+fn benchAddEntries(allocator: std.mem.Allocator, iterations: usize) !void {
+    const entry = [_]u8{ 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8 }; // Example entry data
+    const entry_size = entry.len;
+
+    var page_data = try allocator.alloc(u8, PageSize);
+    defer allocator.free(page_data);
+
+    var page: *PageType = @alignCast(@ptrCast(&page_data[0]));
+
+    for (0..iterations) |_| {
+        _ = page.init(PageSize);
+        while (page.available() >= entry_size)
+            try page.add(@ptrCast(&entry), entry_size);
     }
 }
 
-// Define heap types
-const PH = PairingHeap(i32, void, cmp);
-const PQ = std.PriorityQueue(i32, void, cmp);
-
-fn benchInsertPHSmall(allocator: Allocator) void {
-    genBenchInsert(PH, allocator, SMALL_SIZE);
+fn benchAddEntriesMedium(allocator: std.mem.Allocator) void {
+    benchAddEntries(allocator, LARGE_SIZE) catch unreachable;
 }
 
-fn benchInsertPQSmall(allocator: Allocator) void {
-    genBenchInsert(PQ, allocator, SMALL_SIZE);
-}
+// // Benchmark function for reading entries from the Page
+// fn benchReadEntries(allocator: std.mem.Allocator) !void {
+//     const size = MEDIUM_SIZE;
+//     const entry = [_]u8{ 0x1, 0x2 }; // Example entry data
+//     const entry_size = entry.len;
 
-fn benchInsertPHMedium(allocator: Allocator) void {
-    genBenchInsert(PH, allocator, MEDIUM_SIZE);
-}
+//     var page = try initPage(allocator, size * entry_size * 2);
+//     defer allocator.free(@ptrCast(@as([*]u8, page)));
 
-fn benchInsertPQMedium(allocator: Allocator) void {
-    genBenchInsert(PQ, allocator, MEDIUM_SIZE);
-}
+//     // Add entries to the page
+//     var i: Cap16.Index = 0;
+//     while (i < size) : (i += 1) {
+//         try page.add(@ptrCast(&entry), entry_size);
+//     }
 
-fn benchInsertPHLarge(allocator: Allocator) void {
-    genBenchInsert(PH, allocator, LARGE_SIZE);
-}
+//     // Read entries from the page
+//     i = 0;
+//     while (i < size) : (i += 1) {
+//         const read_entry = page.get(i);
+//         // Do something with read_entry if needed
+//         _ = read_entry;
+//     }
+// }
 
-fn benchInsertPQLarge(allocator: Allocator) void {
-    genBenchInsert(PQ, allocator, LARGE_SIZE);
-}
+// // Benchmark function for deleting entries from the Page
+// fn benchDeleteEntries(allocator: std.mem.Allocator) !void {
+//     const size = MEDIUM_SIZE;
+//     const entry = [_]u8{ 0x1, 0x2 }; // Example entry data
+//     const entry_size = entry.len;
 
-// Generic benchmark function for deleteMin
-fn genBenchDeleteMin(comptime HeapType: type, allocator: Allocator, size: usize) void {
-    var heap = HeapType.init(allocator, {});
-    defer heap.deinit();
+//     var page = try initPage(allocator, size * entry_size * 2);
+//     defer allocator.free(@ptrCast(@as([*]u8, page)));
 
-    for (0..size) |i|
-        heap.add(@intCast(i)) catch unreachable;
+//     // Add entries to the page
+//     var i: Cap16.Index = 0;
+//     while (i < size) : (i += 1) {
+//         try page.add(@ptrCast(&entry), entry_size);
+//     }
 
-    while (heap.removeOrNull() != null) {}
-}
+//     // Delete entries from the page
+//     i = 0;
+//     while (i < size) : (i += 1) {
+//         page.delete(i);
+//     }
+// }
 
-fn benchDeletePHSmall(allocator: Allocator) void {
-    genBenchDeleteMin(PH, allocator, SMALL_SIZE);
-}
+// // Benchmark function for compacting the Page
+// fn benchCompactPage(allocator: std.mem.Allocator) !void {
+//     const size = MEDIUM_SIZE;
+//     const entry = [_]u8{ 0x1, 0x2 }; // Example entry data
+//     const entry_size = entry.len;
 
-fn benchDeletePQSmall(allocator: Allocator) void {
-    genBenchDeleteMin(PQ, allocator, SMALL_SIZE);
-}
+//     var page = try initPage(allocator, size * entry_size * 2);
+//     defer allocator.free(@ptrCast(@as([*]u8, page)));
 
-fn benchDeletePHMedium(allocator: Allocator) void {
-    genBenchDeleteMin(PH, allocator, MEDIUM_SIZE);
-}
+//     // Add entries to the page
+//     var i: Cap16.Index = 0;
+//     while (i < size) : (i += 1) {
+//         try page.add(@ptrCast(&entry), entry_size);
+//     }
 
-fn benchDeletePQMedium(allocator: Allocator) void {
-    genBenchDeleteMin(PQ, allocator, MEDIUM_SIZE);
-}
+//     // Delete half of the entries
+//     i = 0;
+//     while (i < size / 2) : (i += 1) {
+//         page.delete(i);
+//     }
 
-fn benchDeletePHLarge(allocator: Allocator) void {
-    genBenchDeleteMin(PH, allocator, LARGE_SIZE);
-}
+//     // Compact the page
+//     page.compact();
+// }
 
-fn benchDeletePQLarge(allocator: Allocator) void {
-    genBenchDeleteMin(PQ, allocator, LARGE_SIZE);
-}
-
-// Generic benchmark function for mixed operations
-fn genBenchMixedOperations(comptime HeapType: type, allocator: Allocator, size: usize) void {
-    var heap = HeapType.init(allocator, {});
-    defer heap.deinit();
-
-    var prng = std.rand.DefaultPrng.init(42);
-    const random = prng.random();
-
-    var i: usize = 0;
-    while (i < size) : (i += 1) {
-        const op = random.intRangeAtMost(u32, 0, 2);
-        switch (op) {
-            0 => heap.add(random.int(i32)) catch unreachable,
-            1 => if (heap.removeOrNull()) |_| {},
-            2 => {}, // No-op to match distribution
-            else => unreachable,
-        }
-    }
-}
-
-fn benchMixedOperationsPHSmall(allocator: Allocator) void {
-    genBenchMixedOperations(PH, allocator, SMALL_SIZE);
-}
-
-fn benchMixedOperationsPQSmall(allocator: Allocator) void {
-    genBenchMixedOperations(PQ, allocator, SMALL_SIZE);
-}
-
-fn benchMixedOperationsPHMedium(allocator: Allocator) void {
-    genBenchMixedOperations(PH, allocator, MEDIUM_SIZE);
-}
-
-fn benchMixedOperationsPQMedium(allocator: Allocator) void {
-    genBenchMixedOperations(PQ, allocator, MEDIUM_SIZE);
-}
-
-fn benchMixedOperationsPHLarge(allocator: Allocator) void {
-    genBenchMixedOperations(PH, allocator, LARGE_SIZE);
-}
-
-fn benchMixedOperationsPQLarge(allocator: Allocator) void {
-    genBenchMixedOperations(PQ, allocator, LARGE_SIZE);
-}
-
+// Now set up the benchmarks using zbench
 pub fn main() !void {
     // Initialize allocator
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -148,26 +122,25 @@ pub fn main() !void {
     var suite = zbench.Benchmark.init(allocator, .{});
     defer suite.deinit();
 
-    try suite.add("Insert Small (PH)", benchInsertPHSmall, .{});
-    try suite.add("Insert Small (PQ)", benchInsertPQSmall, .{});
-    try suite.add("Insert Medium (PH)", benchInsertPHMedium, .{});
-    try suite.add("Insert Medium (PQ)", benchInsertPQMedium, .{});
-    try suite.add("Insert Large (PH)", benchInsertPHLarge, .{});
-    try suite.add("Insert Large (PQ)", benchInsertPQLarge, .{});
+    // Add benchmarks for adding entries
+    // try suite.add("Add Entries Small", benchAddEntries, &small_size);
+    try suite.add("Add Entries Medium", benchAddEntriesMedium, .{});
+    // try suite.add("Add Entries Large", benchAddEntries, &large_size);
 
-    try suite.add("Delete Small (PH)", benchDeletePHSmall, .{});
-    try suite.add("Delete Small (PQ)", benchDeletePQSmall, .{});
-    try suite.add("Delete Medium (PH)", benchDeletePHMedium, .{});
-    try suite.add("Delete Medium (PQ)", benchDeletePQMedium, .{});
-    try suite.add("Delete Large (PH)", benchDeletePHLarge, .{});
-    try suite.add("Delete Large (PQ)", benchDeletePQLarge, .{});
+    // Add benchmarks for reading entries
+    // try suite.add("Read Entries Small", benchReadEntries, &small_size);
+    // try suite.add("Read Entries Medium", benchReadEntries, .{});
+    // try suite.add("Read Entries Large", benchReadEntries, &large_size);
 
-    try suite.add("Mixed Small (PH)", benchMixedOperationsPHSmall, .{});
-    try suite.add("Mixed Small (PQ)", benchMixedOperationsPQSmall, .{});
-    try suite.add("Mixed Medium (PH)", benchMixedOperationsPHMedium, .{});
-    try suite.add("Mixed Medium (PQ)", benchMixedOperationsPQMedium, .{});
-    try suite.add("Mixed Large (PH)", benchMixedOperationsPHLarge, .{});
-    try suite.add("Mixed Large (PQ)", benchMixedOperationsPQLarge, .{});
+    // Add benchmarks for deleting entries
+    // try suite.add("Delete Entries Small", benchDeleteEntries, &small_size);
+    // try suite.add("Delete Entries Medium", benchDeleteEntries, .{});
+    // try suite.add("Delete Entries Large", benchDeleteEntries, &large_size);
+
+    // Add benchmarks for compacting the page
+    // try suite.add("Compact Page Small", benchCompactPage, &small_size);
+    // try suite.add("Compact Page Medium", benchCompactPage, .{});
+    // try suite.add("Compact Page Large", benchCompactPage, &large_size);
 
     const stdout = std.io.getStdOut().writer();
     try suite.run(stdout);
