@@ -215,7 +215,7 @@ pub fn Page(comptime LayoutType: type, comptime Write: type, comptime Delete: ty
             self.layout = Layout.init(size);
             self.write = Write.init(0);
             self.delete_support = Delete.init();
-            return self.immediatelyAvailable();
+            return self.layout.cap() - header - Layout.Align.sizeOfIndexes(1);
         }
 
         // Read methods
@@ -230,8 +230,10 @@ pub fn Page(comptime LayoutType: type, comptime Write: type, comptime Delete: ty
             return @ptrCast(&data[Layout.Align.getIndex(data, index)]);
         }
 
-        fn immediatelyAvailable(self: *const Self) usize {
-            return self.layout.cap() - header - Layout.Align.sizeOfIndexes(self.len) - self.write.position();
+        fn immediatelyAvailable(self: *const Self, size: usize) bool {
+            const new_value = header + self.write.position() + size;
+            const new_index = self.layout.cap() - Layout.Align.sizeOfIndexes(self.len + 1);
+            return new_value <= new_index;
         }
 
         // Write methods
@@ -241,15 +243,17 @@ pub fn Page(comptime LayoutType: type, comptime Write: type, comptime Delete: ty
             return ptr[header..self.layout.cap()];
         }
 
-        pub fn available(self: *const Self) usize {
-            return self.immediatelyAvailable() + self.delete_support.reclaimable();
+        pub fn available(self: *const Self, size: usize) bool {
+            const new_value = header + self.write.position() + size - self.delete_support.reclaimable();
+            const new_index = self.layout.cap() - Layout.Align.sizeOfIndexes(self.len + 1);
+            return new_value <= new_index;
         }
 
         fn ensureAvailable(self: *Self, size: usize) !void {
-            if (size <= self.immediatelyAvailable()) return;
-            if (size <= self.available()) {
+            if (self.immediatelyAvailable(size)) return;
+            if (self.available(size)) {
                 self.compact();
-                assert(size <= self.immediatelyAvailable());
+                assert(self.immediatelyAvailable(size));
             } else return error.OutOfMemory;
         }
 

@@ -12,7 +12,7 @@ const SMALL_SIZE = 100;
 const MEDIUM_SIZE = 10_000;
 const LARGE_SIZE = 1_000_000;
 
-const PageSize = 4096;
+const PageSize = 4096 * 1;
 const Cap = PageModule.ByteAligned(PageSize);
 const LayoutType = PageModule.Fixed(Cap);
 const WriteType = PageModule.Mutable(Cap.Offset);
@@ -21,7 +21,7 @@ const DeleteType = PageModule.WithoutDelete(Cap.Offset);
 const PageType = PageModule.Page(LayoutType, WriteType, DeleteType);
 
 fn benchAddEntries(allocator: std.mem.Allocator, iterations: usize) !void {
-    const entry = [_]u8{ 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8 }; // Example entry data
+    const entry = [_]u8{ 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 7, 8 }; // Example entry data
     const entry_size = entry.len;
 
     var page_data = try allocator.alloc(u8, PageSize);
@@ -31,8 +31,9 @@ fn benchAddEntries(allocator: std.mem.Allocator, iterations: usize) !void {
 
     for (0..iterations) |_| {
         _ = page.init(PageSize);
-        while (page.available() >= entry_size)
+        while (page.available(entry_size)) {
             try page.add(@ptrCast(&entry), entry_size);
+        }
     }
 }
 
