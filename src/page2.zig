@@ -2,20 +2,18 @@
 // RebelDB™ • https://rebeldb.com • © 2024 Huly Labs • SPDX-License-Identifier: MIT
 //
 
+//! This is RebelDB modular page structure. Designed to be highly configurable
+//! so users can configure byte or bit-level addressing and indexing,
+//! optionally supporting write and delete operations.
+//!
+//! Page is basically an array of variable length values.
+
 const std = @import("std");
 
 const testing = std.testing;
 const assert = std.debug.assert;
 
-// We have many layers of abstraction here, but we're trying to keep it simple
-// Layers are:
-// 1. Capacity -- define types based on the capacity of the page
-// 2. Layout -- define the layout of the page (fixed to capacity or variable length)
-// 3. Read -- read values from the page
-// 4. Write -- write values to the page
-// 5. Delete -- delete values from the page
-
-// 1. Capacity
+// Layouts. User can choose from byte-level or bit-level addressing and indexing.
 
 fn createUnsigned(bitCount: u16) type {
     return @Type(.{
@@ -23,12 +21,13 @@ fn createUnsigned(bitCount: u16) type {
     });
 }
 
-fn Capacity(comptime capacity: comptime_int) type {
-    const capu64: usize = if (capacity == 0) 0 else capacity - 1;
-    const bits_needed = @bitSizeOf(usize) - @clz(capu64);
-    assert(bits_needed <= 16);
+/// Byte-level addressing and indexing support.
+fn ByteAligned(comptime capacity: comptime_int) type {
+    const cap: usize = if (capacity == 0) 0 else capacity - 1;
+    const bits_needed = @bitSizeOf(usize) - @clz(cap);
+    assert(bits_needed <= 64);
 
-    const OffsetType = createUnsigned(bits_needed);
+    const OffsetType = createUnsigned((bits_needed + 7) / 8 * 8);
     assert(capacity % @sizeOf(OffsetType) == 0);
 
     return packed struct {
@@ -64,48 +63,52 @@ fn Capacity(comptime capacity: comptime_int) type {
     };
 }
 
-// 2. Layout
-
-fn Fixed(comptime CapacityType: type) type {
+// Page can grow to the capacity of the alignment type.
+fn Fixed(comptime AlignmentType: type) type {
     return packed struct {
         const Self = @This();
-        const Capacity = CapacityType;
+        const Align = AlignmentType;
 
-        fn init(_: *Self, _: usize) void {}
+        fn init(_: usize) Self {
+            return Self{};
+        }
 
-        fn cap(_: *const Self) usize {
-            return CapacityType.Capacity;
+        fn cap(_: Self) usize {
+            return AlignmentType.Capacity;
         }
     };
 }
 
-fn Variable(comptime CapacityType: type) type {
+// Page can grow to the size provided.
+fn Variable(comptime AlignmentType: type) type {
     return packed struct {
         const Self = @This();
-        const Capacity = CapacityType;
+        const Align = AlignmentType;
 
-        last_byte: CapacityType.Offset,
+        last_byte: AlignmentType.Offset,
 
-        fn init(self: *Self, size: usize) void {
-            self.last_byte = @intCast(size - 1);
+        fn init(size: usize) Self {
+            assert(size <= AlignmentType.Capacity);
+            return Self{ .last_byte = @intCast(size - 1) };
         }
 
-        fn cap(self: *const Self) usize {
+        fn cap(self: Self) usize {
             return self.last_byte + 1;
         }
     };
 }
 
-// 3. Page
-
+// Immutable size. No append operations allowed.
 fn Const(comptime Offset: type) type {
     return packed struct {
         const Self = @This();
-        fn init(_: *Self, _: usize) void {}
-        fn position(_: *Self) Offset {
+        fn init(_: Offset) Self {
+            return Self{};
+        }
+        fn position(_: Self) Offset {
             return 0;
         }
-        fn advance(_: *Self, _: usize) Self {
+        fn advance(_: Self, _: usize) Self {
             unreachable;
         }
     };
@@ -132,8 +135,8 @@ fn Page(comptime LayoutType: type, comptime Write: type) type {
         const Self = @This();
 
         const Layout = LayoutType;
-        const Offset = LayoutType.Capacity.Offset;
-        const Index = LayoutType.Capacity.Index;
+        const Offset = LayoutType.Align.Offset;
+        const Index = LayoutType.Align.Index;
 
         const header = @sizeOf(Self);
 
@@ -150,11 +153,11 @@ fn Page(comptime LayoutType: type, comptime Write: type) type {
 
         fn get(self: *const Self, index: Index) [*]const u8 {
             const data = self.constBytes();
-            return @ptrCast(&data[Layout.Capacity.getIndex(data, index)]);
+            return @ptrCast(&data[Layout.Align.getIndex(data, index)]);
         }
 
-        fn available(self: *const Self) usize {
-            return self.layout.cap() - header - Layout.Capacity.sizeOfIndexes(self.len) - self.write.position();
+        fn available(self: *const Self) usize { // nove to Const / Mutable
+            return self.layout.cap() - header - Layout.Align.sizeOfIndexes(self.len) - self.write.position();
         }
 
         // Write methods
@@ -168,7 +171,7 @@ fn Page(comptime LayoutType: type, comptime Write: type) type {
             assert(size <= self.available());
             const buf = self.bytes();
             const pos = self.write.position();
-            Layout.Capacity.setIndex(buf, self.len, pos);
+            Layout.Align.setIndex(buf, self.len, pos);
             for (0..size) |i| buf[pos + i] = value[i];
             self.write = self.write.advance(size);
             self.len += 1;
@@ -177,7 +180,7 @@ fn Page(comptime LayoutType: type, comptime Write: type) type {
 }
 
 test "Capacity" {
-    const Cap8 = Capacity(8);
+    const Cap8 = ByteAligned(8);
     var buf8 = [_]u8{ 0, 1, 2, 3, 4, 5, 6, 7 };
     try testing.expectEqual(7, Cap8.getIndex(&buf8, 0));
     try testing.expectEqual(@as(usize, 6), Cap8.getIndex(&buf8, 1));
@@ -187,33 +190,33 @@ test "Capacity" {
     try testing.expectEqual(@as(usize, 2), Cap8.getIndex(&buf8, 0));
     try testing.expectEqual(@as(usize, 6), Cap8.getIndex(&buf8, 1));
 
-    const Cap12 = Capacity(4096);
+    const Cap12 = ByteAligned(4096);
     var buf12 = [_]u8{ 42, 42 } ++ .{0} ** 4092 ++ [_]u8{ 1, 0 };
     try testing.expectEqual(@as(usize, 1), Cap12.getIndex(&buf12, 0));
 }
 
 test "Layout" {
     const data = [_]u8{ 3, 7, 6, 0, 0, 0, 2, 1 };
-    const page1: *const Fixed(Capacity(8)) = @ptrCast(&data);
-    const page2: *const Variable(Capacity(8)) = @ptrCast(&data);
+    const page1: *const Fixed(ByteAligned(8)) = @ptrCast(&data);
+    const page2: *const Variable(ByteAligned(8)) = @ptrCast(&data);
 
     try testing.expectEqual(8, page1.cap());
     try testing.expectEqual(4, page2.cap());
 
-    const Zero = Variable(Capacity(0));
+    const Zero = Variable(ByteAligned(0));
     try testing.expectEqual(0, @sizeOf(Zero));
 }
 
 test "Read" {
     const data = [_]u8{ 3, 7, 6, 42, 0, 0, 2, 1 };
-    const Cap8 = Capacity(8);
+    const Cap8 = ByteAligned(8);
     const page: *const Page(Fixed(Cap8), Const(Cap8.Offset)) = @ptrCast(&data);
     try testing.expectEqual(@as(u8, 6), page.get(0)[0]);
     try testing.expectEqual(@as(u8, 42), page.get(1)[0]);
 }
 
 test "Write and Read Data" {
-    const Cap16 = Capacity(16);
+    const Cap16 = ByteAligned(16);
     const LayoutType = Fixed(Cap16);
     const WriteType = Mutable(Cap16.Offset);
 
