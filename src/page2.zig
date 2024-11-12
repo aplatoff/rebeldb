@@ -13,7 +13,9 @@ const std = @import("std");
 const testing = std.testing;
 const assert = std.debug.assert;
 
+//
 // Layouts. User can choose from byte-level or bit-level addressing and indexing.
+//
 
 fn createUnsigned(bitCount: u16) type {
     return @Type(.{
@@ -63,11 +65,16 @@ fn ByteAligned(comptime capacity: comptime_int) type {
     };
 }
 
+//
+//  Page sizes. Fixed to capacity or variable length.
+//
+
 // Page can grow to the capacity of the alignment type.
 fn Fixed(comptime AlignmentType: type) type {
     return packed struct {
         const Self = @This();
         const Align = AlignmentType;
+        const Offset = Align.Offset;
 
         fn init(_: usize) Self {
             return Self{};
@@ -97,6 +104,10 @@ fn Variable(comptime AlignmentType: type) type {
         }
     };
 }
+
+//
+//  Mutability.
+//
 
 // Immutable size. No append operations allowed.
 fn Const(comptime Offset: type) type {
@@ -130,6 +141,59 @@ fn Mutable(comptime Offset: type) type {
     };
 }
 
+//
+//  Delete support.
+//
+
+fn NoDelete(comptime Offset: type) type {
+    return packed struct {
+        const Self = @This();
+
+        fn init(_: usize) Self {
+            return Self{};
+        }
+
+        fn delete(_: Offset) Self {
+            unreachable;
+        }
+
+        fn reclaimable(_: Self) Offset {
+            return 0;
+        }
+    };
+}
+
+fn Delete(comptime Offset: type) type {
+    return packed struct {
+        const Self = @This();
+
+        fn init(_: usize) Self {
+            return Self{};
+        }
+
+        fn delete(_: Offset) Self {
+            unreachable;
+        }
+
+        fn reclaimable(_: Self) Offset {
+            return 0;
+        }
+    };
+}
+
+//
+//
+//
+
+fn noSizeSupport(comptime Offset: type, _: [*]const u8) Offset {
+    unreachable;
+}
+
+//
+//  Page implementation.
+//
+
+/// Page
 fn Page(comptime LayoutType: type, comptime Write: type) type {
     return packed struct {
         const Self = @This();
@@ -156,7 +220,7 @@ fn Page(comptime LayoutType: type, comptime Write: type) type {
             return @ptrCast(&data[Layout.Align.getIndex(data, index)]);
         }
 
-        fn available(self: *const Self) usize { // nove to Const / Mutable
+        fn available(self: *const Self) usize {
             return self.layout.cap() - header - Layout.Align.sizeOfIndexes(self.len) - self.write.position();
         }
 
