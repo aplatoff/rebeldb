@@ -153,7 +153,7 @@ fn WithoutDelete(comptime Offset: type) type {
             return Self{};
         }
 
-        fn deleted(_: Offset) Self {
+        fn deleted(_: [*]const u8) Self {
             unreachable;
         }
 
@@ -176,8 +176,8 @@ fn WithDelete(comptime Offset: type, comptime size_fn: fn (value: [*]const u8) O
             return Self{ .deleted_bytes = 0 };
         }
 
-        fn deleted(self: Self, bytes: Offset) Self {
-            return Self{ .deleted_bytes = self.deleted_bytes + bytes };
+        fn deleted(self: Self, value: [*]const u8) Self {
+            return Self{ .deleted_bytes = self.deleted_bytes + size_fn(value) };
         }
 
         fn reclaimable(self: Self) Offset {
@@ -208,13 +208,13 @@ fn Page(comptime LayoutType: type, comptime Write: type, comptime Delete: type) 
         layout: Layout,
         len: Offset,
         write: Write,
-        delete: Delete,
+        delete_support: Delete,
 
         fn init(self: *Self, size: usize) usize {
-            self.layout.init(size);
             self.len = 0;
+            self.layout = Layout.init(size);
             self.write = Write.init(0);
-            self.delete = Delete.init();
+            self.delete_support = Delete.init();
             return self.immediatelyAvailable();
         }
 
@@ -242,7 +242,7 @@ fn Page(comptime LayoutType: type, comptime Write: type, comptime Delete: type) 
         }
 
         fn available(self: *const Self) usize {
-            return self.immediatelyAvailable() + self.delete.reclaimable();
+            return self.immediatelyAvailable() + self.delete_support.reclaimable();
         }
 
         fn ensureAvailable(self: *Self, size: usize) !void {
@@ -271,26 +271,23 @@ fn Page(comptime LayoutType: type, comptime Write: type, comptime Delete: type) 
                 const cur_offset = Layout.Align.getIndex(self.constBytes(), i);
                 const cur_value = &self.constBytes()[cur_offset];
                 const size = Delete.size(@ptrCast(cur_value));
-                if (new_offset == cur_offset)
-                    new_offset += size
-                else {
-                    assert(new_offset < cur_offset);
+                if (new_offset <= cur_offset) {
                     for (0..size) |j| buf[new_offset + j] = buf[cur_offset + j];
                     Layout.Align.setIndex(buf, i, new_offset);
-                }
+                } else assert(new_offset == cur_offset);
+                new_offset += size;
             }
             assert(new_offset <= self.write.position());
             self.write = Write.init(new_offset);
         }
 
         fn delete(self: *Self, index: Index) void {
-            assert(index < self.len());
-            const offsets = self.header.offsets();
-            self.offset_pos += 1;
-            var offset = offsets.len - 1 - index;
-            while (offset > self.offset_pos) : (offset -= 1)
-                offsets[offset] = offsets[offset - 1];
-            self.delete.deleted(self.get(index));
+            self.delete_support = self.delete_support.deleted(self.get(index));
+            const buf = self.bytes();
+            var i = index;
+            self.len -= 1;
+            while (i < self.len) : (i += 1)
+                Layout.Align.setIndex(buf, i, Layout.Align.getIndex(buf, i + 1));
         }
     };
 }
@@ -358,4 +355,67 @@ test "Write and Read Data" {
     // Verify that the read data matches the written data
     try testing.expect(std.mem.eql(u8, read_data1, &data1));
     try testing.expect(std.mem.eql(u8, read_data2, &data2));
+}
+
+fn constValue(comptime T: type, result: T) type {
+    return struct {
+        fn size(_: [*]const u8) T {
+            return result;
+        }
+    };
+}
+
+test "Delete and Compact Functionality" {
+    const Cap16 = ByteAligned(16);
+    const LayoutType = Fixed(Cap16);
+    const WriteType = Mutable(Cap16.Offset);
+    const DeleteType = WithDelete(Cap16.Offset, constValue(Cap16.Offset, 2).size);
+
+    const PageType = Page(LayoutType, WriteType, DeleteType);
+
+    var page_data = [_]u8{0} ** 256;
+    var page: *PageType = @alignCast(@ptrCast(&page_data));
+
+    _ = page.init(256);
+
+    // Data to write to the page
+    const data1 = [_]u8{ 0x1, 0x2 };
+    const data2 = [_]u8{ 0x3, 0x4 };
+    const data3 = [_]u8{ 0x5, 0x6 };
+    const data4 = [_]u8{ 0x7, 0x8 };
+
+    // Write data to the page
+    try page.add(@ptrCast(&data1), data1.len);
+    try page.add(@ptrCast(&data2), data2.len);
+    try page.add(@ptrCast(&data3), data3.len);
+    try page.add(@ptrCast(&data4), data4.len);
+    try testing.expectEqual(4, page.len);
+
+    page.delete(1);
+    try testing.expectEqual(3, page.len);
+
+    // Read data back from the page
+    const read_data1 = page.get(0)[0..data1.len];
+    const read_data2 = page.get(1)[0..data3.len];
+    const read_data3 = page.get(2)[0..data4.len];
+
+    // Verify that the read data matches the expected data
+    try testing.expect(std.mem.eql(u8, read_data1, &data1));
+    try testing.expect(std.mem.eql(u8, read_data2, &data3));
+    try testing.expect(std.mem.eql(u8, read_data3, &data4));
+
+    page.compact();
+
+    // Read data back from the page
+    const c_data1 = page.get(0)[0..data1.len];
+    std.debug.print("read_data1: {any}\n", .{c_data1});
+    const c_data2 = page.get(1)[0..data3.len];
+    std.debug.print("read_data2: {any}\n", .{c_data2});
+    const c_data3 = page.get(2)[0..data4.len];
+    std.debug.print("read_data3: {any}\n", .{c_data3});
+
+    // Verify that the read data matches the expected data
+    try testing.expect(std.mem.eql(u8, c_data1, &data1));
+    try testing.expect(std.mem.eql(u8, c_data2, &data3));
+    try testing.expect(std.mem.eql(u8, c_data3, &data4));
 }
