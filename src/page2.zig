@@ -24,43 +24,33 @@ fn createUnsigned(bitCount: u16) type {
 }
 
 /// Byte-level addressing and indexing support.
-pub fn ByteAligned(comptime capacity: comptime_int) type {
+pub fn ByteAligned(comptime capacity: comptime_int, OffsetType: type) type {
     const cap: usize = if (capacity == 0) 0 else capacity - 1;
     const bits_needed = @bitSizeOf(usize) - @clz(cap);
     assert(bits_needed <= 64);
 
-    const OffsetType = createUnsigned((bits_needed + 7) / 8 * 8);
-    assert(capacity % @sizeOf(OffsetType) == 0);
+    // const OffsetType = createUnsigned((bits_needed + 7) / 8 * 8);
+    // assert(capacity % @sizeOf(OffsetType) == 0);
 
-    return packed struct {
+    return struct {
         const Capacity = capacity;
         pub const Offset = OffsetType; // used to index any byte in the capacity space
         const Index = OffsetType; // used to index any index in the capacity space
 
-        fn constIndexes(buffer: []const u8) []const Offset {
-            assert(buffer.len % @sizeOf(Index) == 0);
-            const idx: [*]const Index align(1) = @alignCast(@ptrCast(&buffer[0]));
-            return idx[0 .. buffer.len / @sizeOf(Index)];
+        fn sizeOfIndexes(len: Offset) Offset {
+            return @sizeOf(Index) * (len + 1);
         }
 
-        fn indexes(buffer: []u8) []Offset {
-            assert(buffer.len % @sizeOf(Index) == 0);
-            const idx: [*]Index = @alignCast(@ptrCast(&buffer[0]));
-            return idx[0 .. buffer.len / @sizeOf(Index)];
+        fn setIndex(buf: []u8, index: Index, offset: Offset) void {
+            const idx: [*]Index = @alignCast(@ptrCast(buf));
+            // const last_index = last_byte / @sizeOf(Index);
+            idx[buf.len / @sizeOf(Index) - 1 - index] = offset;
         }
 
-        fn sizeOfIndexes(len: usize) Offset {
-            return @intCast(@sizeOf(Index) * len);
-        }
-
-        fn setIndex(buffer: []u8, index: Index, offset: Offset) void {
-            const idx = indexes(buffer);
-            idx[idx.len - 1 - index] = offset;
-        }
-
-        fn getIndex(buffer: []const u8, index: Index) Offset {
-            const idx = constIndexes(buffer);
-            return idx[idx.len - 1 - index];
+        fn getIndex(buf: *u8, last_byte: Offset, index: Index) Offset {
+            const idx: [*]const Index = @alignCast(@ptrCast(buf));
+            const last_index = last_byte / @sizeOf(Index);
+            return idx[last_index - index];
         }
     };
 }
@@ -73,15 +63,30 @@ pub fn ByteAligned(comptime capacity: comptime_int) type {
 pub fn Fixed(comptime AlignmentType: type) type {
     return packed struct {
         const Self = @This();
-        const Align = AlignmentType;
-        const Offset = Align.Offset;
+        const Offset = AlignmentType.Offset;
+        const Index = AlignmentType.Index;
+        const last_byte: Offset = AlignmentType.Capacity - 1;
+        const last_index: Index = AlignmentType.Capacity / @sizeOf(Index) - 1;
 
         fn init(_: usize) Self {
             return Self{};
         }
 
-        fn cap(_: Self) usize {
-            return AlignmentType.Capacity;
+        fn setIndex(self: *Self, index: Index, offset: Offset) void {
+            const buf: [*]u8 = @ptrCast(self);
+            const idx: [*]Index = @alignCast(@ptrCast(buf));
+            idx[last_index - index] = offset;
+
+            // AlignmentType.setIndex(buf[0..AlignmentType.Capacity], index, offset);
+        }
+
+        fn getIndex(self: *const Self, index: Index) Offset {
+            const buf: *u8 = @ptrCast(self);
+            return AlignmentType.getIndex(buf, last_byte, index);
+        }
+
+        fn space(_: *const Self, len: Index) Offset {
+            return last_byte - AlignmentType.sizeOfIndexes(len) + 1;
         }
     };
 }
@@ -200,52 +205,51 @@ pub fn Page(comptime LayoutType: type, comptime Write: type, comptime Delete: ty
         const Self = @This();
 
         const Layout = LayoutType;
-        const Offset = LayoutType.Align.Offset;
-        const Index = LayoutType.Align.Index;
+        const Offset = LayoutType.Offset;
+        const Index = LayoutType.Index;
 
         const header = @sizeOf(Self);
 
-        layout: Layout,
-        len: Offset,
-        write: Write,
+        len: Offset, // it's important to keep `len` and `write` at zero offset -- improves performance 4 times on M1!
+        write: Write, // order of `len` and `write` can be swapped -- no changes on M1
         delete_support: Delete,
+        layout: Layout,
 
         pub fn init(self: *Self, size: usize) usize {
             self.len = 0;
             self.layout = Layout.init(size);
             self.write = Write.init(0);
             self.delete_support = Delete.init();
-            return self.layout.cap() - header - Layout.Align.sizeOfIndexes(1);
+            return self.layout.space(0) - header;
         }
 
         // Read methods
 
         fn constBytes(self: *const Self) []const u8 {
-            const ptr: [*]const u8 = @ptrCast(self);
-            return ptr[header..self.layout.cap()];
+            const values: [*]const u8 = @ptrCast(self);
+            return values[header..self.layout.space(self.len)];
         }
 
         fn get(self: *const Self, index: Index) [*]const u8 {
-            const data = self.constBytes();
-            return @ptrCast(&data[Layout.Align.getIndex(data, index)]);
+            return @ptrCast(&self.constBytes()[self.layout.getIndex(index)]);
         }
 
         fn immediatelyAvailable(self: *const Self, size: usize) bool {
             const new_value = header + self.write.position() + size;
-            const new_index = self.layout.cap() - Layout.Align.sizeOfIndexes(self.len + 1);
+            const new_index = self.layout.space(self.len + 1);
             return new_value <= new_index;
         }
 
         // Write methods
 
         fn bytes(self: *Self) []u8 {
-            const ptr: [*]u8 = @ptrCast(self);
-            return ptr[header..self.layout.cap()];
+            const values: [*]u8 = @ptrCast(self);
+            return values[header..self.layout.space(self.len)];
         }
 
         pub fn available(self: *const Self, size: usize) bool {
             const new_value = header + self.write.position() + size - self.delete_support.reclaimable();
-            const new_index = self.layout.cap() - Layout.Align.sizeOfIndexes(self.len + 1);
+            const new_index = self.layout.space(self.len + 1);
             return new_value <= new_index;
         }
 
@@ -257,11 +261,12 @@ pub fn Page(comptime LayoutType: type, comptime Write: type, comptime Delete: ty
             } else return error.OutOfMemory;
         }
 
-        pub fn add(self: *Self, value: [*]const u8, size: Offset) !void {
-            try self.ensureAvailable(size);
+        pub fn add(self: *Self, value: [*]const u8, size: Offset) void {
+            // try self.ensureAvailable(size);
             const buf = self.bytes();
             const pos = self.write.position();
-            Layout.Align.setIndex(buf, self.len, pos);
+            self.layout.setIndex(self.len, pos);
+            //
             for (0..size) |i| buf[pos + i] = value[i];
             self.write = self.write.advance(size);
             self.len += 1;

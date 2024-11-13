@@ -5,143 +5,64 @@
 
 const std = @import("std");
 const zbench = @import("zbench");
-const PageModule = @import("page2.zig");
+const page = @import("page4.zig");
 
-// Benchmark configurations
-const SMALL_SIZE = 100;
-const MEDIUM_SIZE = 10_000;
+const Allocator = std.mem.Allocator;
+
+const StaticCapacity = page.StaticCapacity;
+const DynamicCapacity = page.DynamicCapacity;
+const ByteAligned = page.ByteAligned;
+const Page = page.Page;
+
 const LARGE_SIZE = 1_000_000;
 
-const PageSize = 4096 * 1;
-const Cap = PageModule.ByteAligned(PageSize);
-const LayoutType = PageModule.Fixed(Cap);
-const WriteType = PageModule.Mutable(Cap.Offset);
-const DeleteType = PageModule.WithoutDelete(Cap.Offset);
+fn getStaticByte_16_u8_u8() usize {
+    const data = [16]u8{ 2, 1, 2, 3, 4, 5, 6, 7, 0, 6, 5, 4, 3, 2, 1, 0 };
+    const StaticBytes = StaticCapacity(16, ByteAligned(u8, u8));
+    const StaticPage = Page(StaticBytes);
+    const p: *const StaticPage = @alignCast(@ptrCast(&data));
 
-const PageType = PageModule.Page(LayoutType, WriteType, DeleteType);
-
-fn benchAddEntries(allocator: std.mem.Allocator, iterations: usize) !void {
-    const entry = [_]u8{ 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 7, 8 }; // Example entry data
-    const entry_size = entry.len;
-
-    var page_data = try allocator.alloc(u8, PageSize);
-    defer allocator.free(page_data);
-
-    var page: *PageType = @alignCast(@ptrCast(&page_data[0]));
-
-    for (0..iterations) |_| {
-        _ = page.init(PageSize);
-        while (page.available(entry_size)) {
-            try page.add(@ptrCast(&entry), entry_size);
-        }
+    var i: usize = 0;
+    for (0..LARGE_SIZE) |_| {
+        if (p.get(@intCast(i % 7))[0] == 123) return 0;
+        i += 3;
     }
+    return i;
 }
 
-fn benchAddEntriesMedium(allocator: std.mem.Allocator) void {
-    benchAddEntries(allocator, LARGE_SIZE) catch unreachable;
+fn benchGetStaticByte_16_u8_u8(_: Allocator) void {
+    std.mem.doNotOptimizeAway(getStaticByte_16_u8_u8());
 }
 
-// // Benchmark function for reading entries from the Page
-// fn benchReadEntries(allocator: std.mem.Allocator) !void {
-//     const size = MEDIUM_SIZE;
-//     const entry = [_]u8{ 0x1, 0x2 }; // Example entry data
-//     const entry_size = entry.len;
+fn getDynamicByte_16_u8_u8() usize {
+    const data = [16]u8{ 2, 15, 1, 2, 3, 4, 5, 6, 7, 6, 5, 4, 3, 2, 1, 0 };
+    const DynamicBytes = DynamicCapacity(16, ByteAligned(u8, u8));
+    const DynamicPage = Page(DynamicBytes);
+    const p: *const DynamicPage = @alignCast(@ptrCast(&data));
 
-//     var page = try initPage(allocator, size * entry_size * 2);
-//     defer allocator.free(@ptrCast(@as([*]u8, page)));
+    var i: usize = 0;
+    for (0..LARGE_SIZE) |_| {
+        if (p.get(@intCast(i % 7))[0] == 123) return 0;
+        i += 3;
+    }
+    return i;
+}
 
-//     // Add entries to the page
-//     var i: Cap16.Index = 0;
-//     while (i < size) : (i += 1) {
-//         try page.add(@ptrCast(&entry), entry_size);
-//     }
-
-//     // Read entries from the page
-//     i = 0;
-//     while (i < size) : (i += 1) {
-//         const read_entry = page.get(i);
-//         // Do something with read_entry if needed
-//         _ = read_entry;
-//     }
-// }
-
-// // Benchmark function for deleting entries from the Page
-// fn benchDeleteEntries(allocator: std.mem.Allocator) !void {
-//     const size = MEDIUM_SIZE;
-//     const entry = [_]u8{ 0x1, 0x2 }; // Example entry data
-//     const entry_size = entry.len;
-
-//     var page = try initPage(allocator, size * entry_size * 2);
-//     defer allocator.free(@ptrCast(@as([*]u8, page)));
-
-//     // Add entries to the page
-//     var i: Cap16.Index = 0;
-//     while (i < size) : (i += 1) {
-//         try page.add(@ptrCast(&entry), entry_size);
-//     }
-
-//     // Delete entries from the page
-//     i = 0;
-//     while (i < size) : (i += 1) {
-//         page.delete(i);
-//     }
-// }
-
-// // Benchmark function for compacting the Page
-// fn benchCompactPage(allocator: std.mem.Allocator) !void {
-//     const size = MEDIUM_SIZE;
-//     const entry = [_]u8{ 0x1, 0x2 }; // Example entry data
-//     const entry_size = entry.len;
-
-//     var page = try initPage(allocator, size * entry_size * 2);
-//     defer allocator.free(@ptrCast(@as([*]u8, page)));
-
-//     // Add entries to the page
-//     var i: Cap16.Index = 0;
-//     while (i < size) : (i += 1) {
-//         try page.add(@ptrCast(&entry), entry_size);
-//     }
-
-//     // Delete half of the entries
-//     i = 0;
-//     while (i < size / 2) : (i += 1) {
-//         page.delete(i);
-//     }
-
-//     // Compact the page
-//     page.compact();
-// }
+fn benchGetDynamicByte_16_u8_u8(_: Allocator) void {
+    std.mem.doNotOptimizeAway(getDynamicByte_16_u8_u8());
+}
 
 // Now set up the benchmarks using zbench
 pub fn main() !void {
-    // Initialize allocator
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    // Create benchmark suite
     var suite = zbench.Benchmark.init(allocator, .{});
     defer suite.deinit();
 
-    // Add benchmarks for adding entries
-    // try suite.add("Add Entries Small", benchAddEntries, &small_size);
-    try suite.add("Add Entries Medium", benchAddEntriesMedium, .{});
-    // try suite.add("Add Entries Large", benchAddEntries, &large_size);
-
-    // Add benchmarks for reading entries
-    // try suite.add("Read Entries Small", benchReadEntries, &small_size);
-    // try suite.add("Read Entries Medium", benchReadEntries, .{});
-    // try suite.add("Read Entries Large", benchReadEntries, &large_size);
-
-    // Add benchmarks for deleting entries
-    // try suite.add("Delete Entries Small", benchDeleteEntries, &small_size);
-    // try suite.add("Delete Entries Medium", benchDeleteEntries, .{});
-    // try suite.add("Delete Entries Large", benchDeleteEntries, &large_size);
-
-    // Add benchmarks for compacting the page
-    // try suite.add("Compact Page Small", benchCompactPage, &small_size);
-    // try suite.add("Compact Page Medium", benchCompactPage, .{});
-    // try suite.add("Compact Page Large", benchCompactPage, &large_size);
+    try suite.add("Get Static Byte 16 u8 u8", benchGetStaticByte_16_u8_u8, .{});
+    try suite.add("Get Dynamic Byte 16 u8 u8", benchGetDynamicByte_16_u8_u8, .{});
 
     const stdout = std.io.getStdOut().writer();
     try suite.run(stdout);
