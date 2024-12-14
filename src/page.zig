@@ -108,8 +108,8 @@ pub fn Mutable(comptime Offset: type) type {
             return self.value;
         }
 
-        inline fn advance(self: Self, size: Offset) Self {
-            return Self{ .value = self.value + size };
+        inline fn advance(self: *Self, size: Offset) void {
+            self.value += size;
         }
     };
 }
@@ -126,7 +126,7 @@ pub fn Readonly(comptime Offset: type) type {
             unreachable;
         }
 
-        inline fn advance(_: Self, _: Offset) Self {
+        inline fn advance(_: *Self, _: Offset) Self {
             unreachable;
         }
     };
@@ -178,14 +178,14 @@ pub fn Page(comptime Capacity: type, comptime Append: type) type {
             const buf = self.values();
             for (0..size) |i| buf[pos + i] = value[i];
 
-            self.append = self.append.advance(size);
+            self.append.advance(size);
             self.len += 1;
         }
 
         pub fn alloc(self: *Self, size: Offset) Index {
             const pos = self.append.position();
             self.cap.setOffset(@ptrCast(self), self.len, pos);
-            self.append = self.append.advance(size);
+            self.append.advance(size);
             self.len += 1;
             return self.len;
         }
