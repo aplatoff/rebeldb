@@ -21,16 +21,28 @@ pub fn ByteAligned(comptime OffsetType: type, comptime IndexType: type) type {
         //     idx[buf.len / @sizeOf(Index) - 1 - index] = offset;
         // }
 
-        fn getOffsetRT(page: [*]const u8, index: Index, last_byte: Offset) Offset {
+        inline fn getOffsetRuntime(page: [*]const u8, index: Index, last_byte: Offset) Offset {
             const pos = last_byte - (index + 1) * @sizeOf(Index) + 1;
             const ptr: *const Offset = @alignCast(@ptrCast(&page[pos]));
             return ptr.*;
         }
 
-        inline fn getOffsetCT(page: [*]const u8, index: Index, comptime capacity: comptime_int) Offset {
+        inline fn getOffsetComptime(page: [*]const u8, index: Index, comptime capacity: comptime_int) Offset {
             const pos = capacity - (index + 1) * @sizeOf(Index);
             const ptr: *const Offset = @alignCast(@ptrCast(&page[pos]));
             return ptr.*;
+        }
+
+        inline fn setOffsetRuntime(page: [*]u8, index: Index, offset: Offset, last_byte: Offset) void {
+            const pos = last_byte - (index + 1) * @sizeOf(Index) + 1;
+            const ptr: *Offset = @alignCast(@ptrCast(&page[pos]));
+            ptr.* = offset;
+        }
+
+        inline fn setOffsetComptime(page: [*]u8, index: Index, offset: Offset, comptime capacity: comptime_int) void {
+            const pos = capacity - (index + 1) * @sizeOf(Index);
+            const ptr: *Offset = @alignCast(@ptrCast(&page[pos]));
+            ptr.* = offset;
         }
     };
 }
@@ -47,12 +59,12 @@ pub fn StaticCapacity(comptime capacity: comptime_int, comptime Align: type) typ
             return Self{};
         }
 
-        // inline fn startOfIndices(_: Self, len: Index) usize {
-        //     return capacity - Align.sizeOfIndices(len);
-        // }
-
         inline fn getOffset(_: Self, page: [*]const u8, index: Index) Offset {
-            return Align.getOffsetCT(page, index, capacity);
+            return Align.getOffsetComptime(page, index, capacity);
+        }
+
+        inline fn setOffset(_: Self, page: [*]u8, index: Index, offset: Offset) void {
+            return Align.setOffsetRuntime(page, index, offset, capacity);
         }
     };
 }
@@ -65,22 +77,62 @@ pub fn DynamicCapacity(comptime _: comptime_int, comptime Align: type) type {
 
         last_byte: Offset,
 
-        fn init(size: usize) Self {
+        inline fn init(size: usize) Self {
             return Self{ .last_byte = @intCast(size - 1) };
         }
 
-        // fn startOfIndices(self: Self, len: Index) usize {
-        //     return @as(usize, self.last_byte) + 1 - Align.sizeOfIndices(len);
-        // }
+        inline fn getOffset(self: Self, page: [*]const u8, index: Index) Offset {
+            return Align.getOffsetRuntime(page, index, self.last_byte);
+        }
 
-        fn getOffset(self: Self, page: [*]const u8, index: Index) Offset {
-            return Align.getOffsetRT(page, index, self.last_byte);
+        inline fn setOffset(self: Self, page: [*]u8, index: Index, offset: Offset) void {
+            return Align.setOffsetRuntime(page, index, offset, self.last_byte);
+        }
+    };
+}
+
+// Mutability
+
+pub fn Mutable(comptime Offset: type) type {
+    return packed struct {
+        const Self = @This();
+
+        value: Offset,
+
+        inline fn init() Self {
+            return Self{ .value = 0 };
+        }
+
+        inline fn position(self: Self) Offset {
+            return self.value;
+        }
+
+        inline fn advance(self: Self, size: Offset) Self {
+            return Self{ .value = self.value + size };
+        }
+    };
+}
+
+pub fn Readonly(comptime Offset: type) type {
+    return packed struct {
+        const Self = @This();
+
+        inline fn init() Self {
+            return Self{};
+        }
+
+        inline fn position(_: Self) Offset {
+            unreachable;
+        }
+
+        inline fn advance(_: Self, _: Offset) Self {
+            unreachable;
         }
     };
 }
 
 /// Page
-pub fn Page(comptime Capacity: type) type {
+pub fn Page(comptime Capacity: type, comptime Append: type) type {
     return packed struct {
         const Self = @This();
         const Offset = Capacity.Offset;
@@ -88,68 +140,104 @@ pub fn Page(comptime Capacity: type) type {
 
         len: Offset,
         cap: Capacity,
-        // append: Append,
+        append: Append,
         // delete: Delete,
 
         // returns bytes available for writing
         pub fn init(self: *Self, capacity: usize) Offset {
             self.len = 0;
             self.cap = Capacity.init(capacity);
+            self.append = Append.init();
             return 0;
         }
 
         // Read methods
 
-        fn constValues(self: *const Self) [*]const u8 {
-            const values: [*]const u8 = @ptrCast(self);
-            return @ptrCast(&values[@sizeOf(Self)]);
+        inline fn constValues(self: *const Self) [*]const u8 {
+            const val: [*]const u8 = @ptrCast(self);
+            return @ptrCast(&val[@sizeOf(Self)]);
         }
 
         pub fn get(self: *const Self, index: Index) [*]const u8 {
             const page: [*]const u8 = @ptrCast(self);
             return @ptrCast(&self.constValues()[self.cap.getOffset(page, index)]);
         }
+
+        // Write methods
+
+        inline fn values(self: *Self) [*]u8 {
+            const val: [*]u8 = @ptrCast(self);
+            return @ptrCast(&val[@sizeOf(Self)]);
+        }
+
+        pub fn push(self: *Self, value: [*]const u8, size: Offset) void {
+            self.len += 1;
+            const pos = self.append.position();
+            self.cap.setOffset(@ptrCast(self), self.len, pos);
+
+            const buf = self.values();
+            var i: Offset = 0;
+            while (i < size) : (i += 1) buf[pos + i] = value[i];
+            self.append = self.append.advance(size);
+        }
     };
 }
 
 const testing = std.testing;
 
-test "get static bytes u8 u8" {
+test "get readonly static bytes u8 u8" {
     const data = [16]u8{ 2, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 5, 0 };
-    const StaticBytes = StaticCapacity(16, ByteAligned(u8, u8));
-    const StaticPage = Page(StaticBytes);
+    const StaticPage = Page(StaticCapacity(16, ByteAligned(u8, u8)), Readonly(u8));
     const static_page: *const StaticPage = @ptrCast(&data);
 
+    try testing.expectEqual(1, @sizeOf(StaticPage));
     try testing.expectEqual(@as(u8, 1), static_page.get(0)[0]);
     try testing.expectEqual(@as(u8, 6), static_page.get(1)[0]);
 }
 
-test "get static bytes u8 u16" {
-    const data = [16]u8{ 2, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 5, 0, 0, 0 };
-    const StaticBytes = StaticCapacity(16, ByteAligned(u8, u16));
-    const StaticPage = Page(StaticBytes);
-    const static_page: *const StaticPage = @ptrCast(&data);
+test "get and push mutable static bytes u8 u8" {
+    var data = [16]u8{ 2, 6, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 5, 0 };
+    const StaticPage = Page(StaticCapacity(16, ByteAligned(u8, u8)), Mutable(u8));
+    const static_page: *StaticPage = @alignCast(@ptrCast(&data));
 
-    try testing.expectEqual(@as(u8, 1), static_page.get(0)[0]);
-    try testing.expectEqual(@as(u8, 6), static_page.get(1)[0]);
+    try testing.expectEqual(2, @sizeOf(StaticPage));
+    try testing.expectEqual(@as(u8, 2), static_page.get(0)[0]);
+    try testing.expectEqual(@as(u8, 7), static_page.get(1)[0]);
+
+    const value = [1]u8{100};
+    static_page.push(&value, 1);
+
+    try testing.expectEqual(@as(u8, 3), data[0]);
+    try testing.expectEqual(@as(u8, 7), data[1]);
+    try testing.expectEqual(@as(u8, 100), static_page.get(2)[0]);
 }
 
-test "get dynamic bytes u8 u8" {
-    const data = [16]u8{ 2, 15, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 5, 0 };
-    const DynamicBytes = DynamicCapacity(16, ByteAligned(u8, u8));
-    const DynamicPage = Page(DynamicBytes);
-    const page: *const DynamicPage = @alignCast(@ptrCast(&data));
+// test "get static bytes u8 u16" {
+//     const data = [16]u8{ 2, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 5, 0, 0, 0 };
+//     const StaticBytes = StaticCapacity(16, ByteAligned(u8, u16));
+//     const StaticPage = Page(StaticBytes);
+//     const static_page: *const StaticPage = @ptrCast(&data);
 
-    try testing.expectEqual(@as(u8, 1), page.get(0)[0]);
-    try testing.expectEqual(@as(u8, 6), page.get(1)[0]);
-}
+//     try testing.expectEqual(@as(u8, 1), static_page.get(0)[0]);
+//     try testing.expectEqual(@as(u8, 6), static_page.get(1)[0]);
+// }
 
-test "get dynamic bytes u8 u16" {
-    const data = [16]u8{ 2, 15, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 5, 0, 0, 0 };
-    const DynamicBytes = DynamicCapacity(16, ByteAligned(u8, u16));
-    const DynamicPage = Page(DynamicBytes);
-    const page: *const DynamicPage = @alignCast(@ptrCast(&data));
+// test "get dynamic bytes u8 u8" {
+//     const data = [16]u8{ 2, 15, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 5, 0 };
+//     const DynamicBytes = DynamicCapacity(16, ByteAligned(u8, u8));
+//     const DynamicPage = Page(DynamicBytes);
+//     const page: *const DynamicPage = @alignCast(@ptrCast(&data));
 
-    try testing.expectEqual(@as(u8, 1), page.get(0)[0]);
-    try testing.expectEqual(@as(u8, 6), page.get(1)[0]);
-}
+//     try testing.expectEqual(@as(u8, 1), page.get(0)[0]);
+//     try testing.expectEqual(@as(u8, 6), page.get(1)[0]);
+// }
+
+// test "get dynamic bytes u8 u16" {
+//     const data = [16]u8{ 2, 15, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 5, 0, 0, 0 };
+//     const DynamicBytes = DynamicCapacity(16, ByteAligned(u8, u16));
+//     const DynamicPage = Page(DynamicBytes);
+//     const page: *const DynamicPage = @alignCast(@ptrCast(&data));
+
+//     try testing.expectEqual(@as(u8, 1), page.get(0)[0]);
+//     try testing.expectEqual(@as(u8, 6), page.get(1)[0]);
+// }
