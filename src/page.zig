@@ -171,15 +171,17 @@ pub fn Page(comptime Capacity: type, comptime Append: type) type {
             return @ptrCast(&val[@sizeOf(Self)]);
         }
 
-        pub fn push(self: *Self, value: [*]const u8, size: Offset) void {
+        pub fn push(self: *Self, value: [*]const u8, size: Offset) Index {
+            const index = self.len;
             const pos = self.append.position();
-            self.cap.setOffset(@ptrCast(self), self.len, pos);
+            self.cap.setOffset(@ptrCast(self), index, pos);
 
             const buf = self.values();
             for (0..size) |i| buf[pos + i] = value[i];
 
             self.append.advance(size);
             self.len += 1;
+            return index;
         }
 
         pub fn alloc(self: *Self, size: Offset) Index {
@@ -215,7 +217,7 @@ test "get and push mutable static bytes u8 u8" {
     try testing.expectEqual(@as(u8, 7), static_page.get(1)[0]);
 
     const value = [1]u8{100};
-    static_page.push(&value, 1);
+    _ = static_page.push(&value, 1);
 
     try testing.expectEqual(@as(u8, 3), data[0]);
     try testing.expectEqual(@as(u8, 7), data[1]);
@@ -274,7 +276,7 @@ export fn get(page: *const HeapPage, index: PageIndex) [*]const u8 {
 }
 
 export fn push(page: *HeapPage, value: [*]const u8, size: PageOffset) void {
-    return page.push(value, size);
+    _ = page.push(value, size);
 }
 
 export fn alloc(page: *HeapPage, size: PageOffset) PageIndex {

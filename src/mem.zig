@@ -16,6 +16,7 @@ const Offset = u16; // 64KB max page size
 const Index = u16;
 
 const PageId = u32;
+const PageSize = 0x10000;
 
 pub const Address = packed struct { page: PageId, index: Index };
 
@@ -24,20 +25,20 @@ pub const Address = packed struct { page: PageId, index: Index };
 pub const PageManager = struct {
     const Self = @This();
 
-    const PageSize = 0x10000;
-    const Page = pg.Page(StaticCapacity(PageSize, ByteAligned(Offset, Index)), Mutable(Offset));
+    const Header = pg.Page(StaticCapacity(PageSize - @sizeOf(PageId), ByteAligned(Offset, Index)), Mutable(Offset));
+
+    const Page = struct {
+        id: PageId,
+        data: Header,
+        buf: [PageSize - @sizeOf(PageId) - @sizeOf(Header)]u8,
+    };
+
+    fn cmpFree(_: void, a: *Page, b: *Page) Order {
+        return std.math.order(a.data.available(), b.data.available());
+    }
 
     const Pages = std.ArrayList(*Page);
-
-    const FreeSpace = struct { page: PageId, free: Offset };
-    fn cmp(_: void, a: FreeSpace, b: FreeSpace) Order {
-        if (a.free < b.free) return Order.lt;
-        if (a.free > b.free) return Order.gt;
-        // if (a.page < b.page) return Order.gt;
-        // if (a.page > b.page) return Order.lt;
-        return Order.eq;
-    }
-    const Heap = std.PriorityQueue(FreeSpace, void, cmp);
+    const Heap = std.PriorityQueue(*Page, void, cmpFree);
 
     pages: Pages,
     heap: Heap,
@@ -57,48 +58,60 @@ pub const PageManager = struct {
         self.heap.deinit();
     }
 
-    fn memUsage(self: *Self) void {
-        var it = self.heap.iterator();
-        var allocated: usize = 0;
+    fn freeMem(self: *Self) usize {
         var free: usize = 0;
-        while (it.next()) |space| {
-            allocated += PageSize - 3 * @sizeOf(Offset);
-            free += space.free;
-        }
-        std.debug.print("allocated: {d} bytes\nfree: {d} bytes\n", .{ allocated, free });
+        var it = self.heap.iterator();
+        while (it.next()) |page| free += page.data.available();
+        return free;
     }
 
-    fn allocInPage(self: *Self, page: *Page, id: PageId, available: Offset, size: Offset) !Address {
-        assert(size <= available);
-        try self.heap.add(FreeSpace{ .page = id, .free = available - size });
-        return Address{ .page = id, .index = page.alloc(size) };
-    }
-
-    fn allocNewPage(self: *Self, size: Offset) !Address {
+    fn allocNewPage(self: *Self) !*Page {
         const page = try self.page_allocator.create(Page);
-        const available = page.init(PageSize);
-        const id: PageId = @intCast(self.pages.items.len);
+        page.id = @intCast(self.pages.items.len);
+        _ = page.data.init(PageSize - @sizeOf(PageId));
         try self.pages.append(page);
-        return self.allocInPage(page, id, available, size);
+        return page;
     }
 
-    pub fn alloc(self: *Self, size: Offset) !Address {
-        const free_space = self.heap.removeOrNull();
-        return if (free_space) |space|
-            if (space.free < size) self.allocNewPage(size) else self.allocInPage(self.pages.items[space.page], space.page, space.free, size)
+    fn getOrAllocPage(self: *Self, size: Offset) !*Page {
+        return if (self.heap.peek()) |page|
+            if (page.data.available() < size)
+                self.allocNewPage()
+            else
+                self.heap.remove()
         else
-            self.allocNewPage(size);
+            self.allocNewPage();
+    }
+
+    // pub fn allocEmpty(self: *Self, size: Offset) !Address {
+    //     const page = try self.getOrAllocPage(size);
+    //     const address = Address{ .page = page.id, .index = page.data.alloc(size) };
+    //     try self.heap.add(page);
+    //     return address;
+    // }
+
+    pub fn alloc(self: *Self, buf: [*]const u8, size: Offset) !Address {
+        const page = try self.getOrAllocPage(size);
+        const address = Address{ .page = page.id, .index = page.data.push(buf, size) };
+        try self.heap.add(page);
+        return address;
     }
 };
 
 const testing = std.testing;
 
 test "init" {
+    var data = [_]u8{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
     var manager = PageManager.init(testing.allocator, testing.allocator);
     defer manager.deinit();
-    const bytes1 = manager.alloc(10);
-    std.debug.print("bytes: {any}\n", .{bytes1});
-    // const bytes2 = manager.alloc(55);
-    // std.debug.print("bytes: {any}\n", .{bytes2});
-    manager.memUsage();
+    const addr1 = try manager.alloc(&data, 10);
+    std.debug.print("allocated address: {d}:{d}, free: {d}\n", .{ addr1.page, addr1.index, manager.freeMem() });
+    const addr2 = try manager.alloc(&data, 20);
+    std.debug.print("allocated address: {d}:{d}, free: {d}\n", .{ addr2.page, addr2.index, manager.freeMem() });
+}
+
+// for assemly generation
+// zig build-lib -O ReleaseSmall -femit-asm=page.asm src/mem.zig
+export fn heapAlloc(heap: *PageManager, buf: [*]const u8, size: Offset) void {
+    _ = heap.alloc(buf, size) catch unreachable;
 }
