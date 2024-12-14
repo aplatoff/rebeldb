@@ -1,8 +1,11 @@
+// bench.zig
+//
 // RebelDB™ © 2024 Huly Labs • https://rebeldb.com • SPDX-License-Identifier: MIT
+//
 
 const std = @import("std");
 const zbench = @import("zbench");
-const page = @import("page.zig");
+const page = @import("page4.zig");
 
 const Allocator = std.mem.Allocator;
 

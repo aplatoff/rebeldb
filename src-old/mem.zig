@@ -1,4 +1,6 @@
+//
 // RebelDB™ © 2024 Huly Labs • https://hulylabs.com • SPDX-License-Identifier: MIT
+//
 
 const std = @import("std");
 const pg = @import("page.zig");
@@ -7,14 +9,8 @@ const Allocator = std.mem.Allocator;
 const Order = std.math.Order;
 const assert = std.debug.assert;
 
-const StaticCapacity = pg.StaticCapacity;
-const DynamicCapacity = pg.DynamicCapacity;
-const ByteAligned = pg.ByteAligned;
-const Readonly = pg.Readonly;
-
 const Offset = u16; // 64KB max page size
 const PageId = u32;
-
 pub const Address = packed struct { index: Offset, page: PageId };
 
 // We're managing pages externally, they can be loaded from disk, etc.
@@ -23,7 +19,7 @@ pub const PageManager = struct {
     const Self = @This();
 
     const PageSize = 0x10000;
-    const Page = pg.Page(StaticCapacity(PageSize, ByteAligned(Offset, Offset)), Readonly(Offset));
+    const Page = pg.Page(pg.Mutable(pg.Fixed(Offset, PageSize), pg.ControlNone));
 
     // const PageDescriptor = struct { page: *Page };
     const Pages = std.ArrayList(*Page);
@@ -106,4 +102,8 @@ test "init" {
     const bytes2 = manager.alloc(55);
     std.debug.print("bytes: {any}\n", .{bytes2});
     manager.memUsage();
+    // var allocator = &manager.createAllocator();
+    // const page = try allocator.alloc();
+    // try testing.expectEqual(0, page);
+    // allocator.free(page);
 }
