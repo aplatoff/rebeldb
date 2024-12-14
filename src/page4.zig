@@ -3,6 +3,7 @@
 //
 
 const std = @import("std");
+const assert = std.debug.assert;
 
 // Alignment is a type that defines the alignment of the index values on the page.
 
@@ -176,8 +177,8 @@ pub fn Page(comptime Capacity: type, comptime Append: type) type {
             self.cap.setOffset(@ptrCast(self), self.len, pos);
 
             const buf = self.values();
-            var i: Offset = 0;
-            while (i < size) : (i += 1) buf[pos + i] = value[i];
+            for (0..size) |i| buf[pos + i] = value[i];
+
             self.append = self.append.advance(size);
         }
     };
@@ -241,3 +242,13 @@ test "get and push mutable static bytes u8 u8" {
 //     try testing.expectEqual(@as(u8, 1), page.get(0)[0]);
 //     try testing.expectEqual(@as(u8, 6), page.get(1)[0]);
 // }
+
+const SPage = Page(StaticCapacity(16, ByteAligned(u8, u8)), Mutable(u8));
+
+export fn get(page: *const SPage, pos: u8) [*]const u8 {
+    return page.get(pos);
+}
+
+export fn push(page: *SPage, value: [*]const u8, size: u8) void {
+    return page.push(value, size);
+}
