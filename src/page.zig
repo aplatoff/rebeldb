@@ -12,37 +12,17 @@ pub fn ByteAligned(comptime OffsetType: type, comptime IndexType: type) type {
         const Offset = OffsetType;
         const Index = IndexType;
 
-        // fn sizeOfIndices(len: Index) usize {
-        //     return @sizeOf(Index) * len;
-        // }
+        inline fn getIndex(index0: Offset, index: Index) Offset {
+            return index0 - index * @sizeOf(Index);
+        }
 
-        // fn setIndex(buf: []u8, index: Index, offset: Offset) void {
-        //     const idx: [*]Index = @alignCast(@ptrCast(buf));
-        //     // const last_index = last_byte / @sizeOf(Index);
-        //     idx[buf.len / @sizeOf(Index) - 1 - index] = offset;
-        // }
-
-        inline fn getOffsetRuntime(page: [*]const u8, index: Index, last_byte: Offset) Offset {
-            const pos = last_byte - (index + 1) * @sizeOf(Index) + 1;
-            const ptr: *const Offset = @alignCast(@ptrCast(&page[pos]));
+        inline fn getOffset(page: [*]const u8, index: Index, index0: Offset) Offset {
+            const ptr: *const Offset = @alignCast(@ptrCast(&page[getIndex(index0, index)]));
             return ptr.*;
         }
 
-        inline fn getOffsetComptime(page: [*]const u8, index: Index, comptime capacity: comptime_int) Offset {
-            const pos = capacity - (index + 1) * @sizeOf(Index);
-            const ptr: *const Offset = @alignCast(@ptrCast(&page[pos]));
-            return ptr.*;
-        }
-
-        inline fn setOffsetRuntime(page: [*]u8, index: Index, offset: Offset, last_byte: Offset) void {
-            const pos = last_byte - (index + 1) * @sizeOf(Index) + 1;
-            const ptr: *Offset = @alignCast(@ptrCast(&page[pos]));
-            ptr.* = offset;
-        }
-
-        inline fn setOffsetComptime(page: [*]u8, index: Index, offset: Offset, comptime capacity: comptime_int) void {
-            const pos = capacity - (index + 1) * @sizeOf(Index);
-            const ptr: *Offset = @alignCast(@ptrCast(&page[pos]));
+        inline fn setOffset(page: [*]u8, index: Index, offset: Offset, index0: Offset) void {
+            const ptr: *Offset = @alignCast(@ptrCast(&page[getIndex(index0, index)]));
             ptr.* = offset;
         }
     };
@@ -60,12 +40,16 @@ pub fn StaticCapacity(comptime capacity: comptime_int, comptime Align: type) typ
             return Self{};
         }
 
+        inline fn free(_: Self, len: Index) Offset {
+            return Align.getIndex(capacity - @sizeOf(Offset), len);
+        }
+
         inline fn getOffset(_: Self, page: [*]const u8, index: Index) Offset {
-            return Align.getOffsetComptime(page, index, capacity);
+            return Align.getOffset(page, index, capacity - @sizeOf(Offset));
         }
 
         inline fn setOffset(_: Self, page: [*]u8, index: Index, offset: Offset) void {
-            return Align.setOffsetComptime(page, index, offset, capacity);
+            return Align.setOffset(page, index, offset, capacity - @sizeOf(Offset));
         }
     };
 }
@@ -76,18 +60,22 @@ pub fn DynamicCapacity(comptime _: comptime_int, comptime Align: type) type {
         const Offset = Align.Offset;
         const Index = Align.Index;
 
-        last_byte: Offset,
+        index0: Offset,
 
         inline fn init(size: usize) Self {
-            return Self{ .last_byte = @intCast(size - 1) };
+            return Self{ .index0 = @intCast(size - @sizeOf(Offset)) };
+        }
+
+        inline fn free(self: Self, len: Index) Offset {
+            return Align.getIndex(self.index0, len);
         }
 
         inline fn getOffset(self: Self, page: [*]const u8, index: Index) Offset {
-            return Align.getOffsetRuntime(page, index, self.last_byte);
+            return Align.getOffset(page, index, self.index0);
         }
 
         inline fn setOffset(self: Self, page: [*]u8, index: Index, offset: Offset) void {
-            return Align.setOffsetRuntime(page, index, offset, self.last_byte);
+            return Align.setOffset(page, index, offset, self.index0);
         }
     };
 }
@@ -102,6 +90,10 @@ pub fn Mutable(comptime Offset: type) type {
 
         inline fn init() Self {
             return Self{ .value = 0 };
+        }
+
+        inline fn available(self: Self, free: Offset) Offset {
+            return free - self.value;
         }
 
         inline fn position(self: Self) Offset {
@@ -122,6 +114,10 @@ pub fn Readonly(comptime Offset: type) type {
             return Self{};
         }
 
+        inline fn available(_: Self, _: Offset) Offset {
+            return 0;
+        }
+
         inline fn position(_: Self) Offset {
             unreachable;
         }
@@ -139,7 +135,7 @@ pub fn Page(comptime Capacity: type, comptime Append: type) type {
         const Offset = Capacity.Offset;
         const Index = Capacity.Index;
 
-        len: Offset,
+        len: Index,
         cap: Capacity,
         append: Append,
         // delete: Delete,
@@ -149,7 +145,11 @@ pub fn Page(comptime Capacity: type, comptime Append: type) type {
             self.len = 0;
             self.cap = Capacity.init(capacity);
             self.append = Append.init();
-            return 0;
+            return self.available();
+        }
+
+        pub fn available(self: *Self) Offset {
+            return self.append.available(self.cap.free(self.len) - @sizeOf(Self));
         }
 
         // Read methods
@@ -183,11 +183,12 @@ pub fn Page(comptime Capacity: type, comptime Append: type) type {
         }
 
         pub fn alloc(self: *Self, size: Offset) Index {
+            const index = self.len;
             const pos = self.append.position();
-            self.cap.setOffset(@ptrCast(self), self.len, pos);
+            self.cap.setOffset(@ptrCast(self), index, pos);
             self.append.advance(size);
             self.len += 1;
-            return self.len;
+            return index;
         }
     };
 }
@@ -221,6 +222,14 @@ test "get and push mutable static bytes u8 u8" {
     try testing.expectEqual(@as(u8, 100), static_page.get(2)[0]);
 }
 
+test "mutable static bytes u16 u16" {
+    var data = [16]u16{ 0, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 5, 0 };
+    const StaticPage = Page(StaticCapacity(0x10000, ByteAligned(u16, u16)), Mutable(u16));
+    const static_page: *StaticPage = @alignCast(@ptrCast(&data));
+
+    try testing.expectEqual(@as(u16, 65530), static_page.available());
+}
+
 // test "get static bytes u8 u16" {
 //     const data = [16]u8{ 2, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 5, 0, 0, 0 };
 //     const StaticBytes = StaticCapacity(16, ByteAligned(u8, u16));
@@ -251,12 +260,27 @@ test "get and push mutable static bytes u8 u8" {
 //     try testing.expectEqual(@as(u8, 6), page.get(1)[0]);
 // }
 
-const SPage = Page(StaticCapacity(16, ByteAligned(u8, u8)), Mutable(u8));
+// for assemly generation
+// zig build-lib -O ReleaseSmall -femit-asm=page.asm src/page.zig
 
-export fn get(page: *const SPage, pos: u8) [*]const u8 {
-    return page.get(pos);
+const PageSize = 0x10000;
+const PageIndex = u16;
+const PageOffset = u16;
+
+const HeapPage = Page(StaticCapacity(PageSize, ByteAligned(PageOffset, PageIndex)), Mutable(PageOffset));
+
+export fn get(page: *const HeapPage, index: PageIndex) [*]const u8 {
+    return page.get(index);
 }
 
-export fn push(page: *SPage, value: [*]const u8, size: u8) void {
+export fn push(page: *HeapPage, value: [*]const u8, size: PageOffset) void {
     return page.push(value, size);
+}
+
+export fn alloc(page: *HeapPage, size: PageOffset) PageIndex {
+    return page.alloc(size);
+}
+
+export fn available(page: *HeapPage) PageOffset {
+    return page.available();
 }

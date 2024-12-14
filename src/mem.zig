@@ -10,12 +10,14 @@ const assert = std.debug.assert;
 const StaticCapacity = pg.StaticCapacity;
 const DynamicCapacity = pg.DynamicCapacity;
 const ByteAligned = pg.ByteAligned;
-const Readonly = pg.Readonly;
+const Mutable = pg.Mutable;
 
 const Offset = u16; // 64KB max page size
+const Index = u16;
+
 const PageId = u32;
 
-pub const Address = packed struct { index: Offset, page: PageId };
+pub const Address = packed struct { page: PageId, index: Index };
 
 // We're managing pages externally, they can be loaded from disk, etc.
 // This is just a simple example of how to manage pages in memory.
@@ -23,21 +25,18 @@ pub const PageManager = struct {
     const Self = @This();
 
     const PageSize = 0x10000;
-    const Page = pg.Page(StaticCapacity(PageSize, ByteAligned(Offset, Offset)), Readonly(Offset));
+    const Page = pg.Page(StaticCapacity(PageSize, ByteAligned(Offset, Index)), Mutable(Offset));
 
-    // const PageDescriptor = struct { page: *Page };
     const Pages = std.ArrayList(*Page);
 
-    const FreeSpace = struct { free: Offset, page: PageId };
-
+    const FreeSpace = struct { page: PageId, free: Offset };
     fn cmp(_: void, a: FreeSpace, b: FreeSpace) Order {
         if (a.free < b.free) return Order.lt;
         if (a.free > b.free) return Order.gt;
-        if (a.page < b.page) return Order.gt;
-        if (a.page > b.page) return Order.lt;
+        // if (a.page < b.page) return Order.gt;
+        // if (a.page > b.page) return Order.lt;
         return Order.eq;
     }
-
     const Heap = std.PriorityQueue(FreeSpace, void, cmp);
 
     pages: Pages,
@@ -69,28 +68,24 @@ pub const PageManager = struct {
         std.debug.print("allocated: {d} bytes\nfree: {d} bytes\n", .{ allocated, free });
     }
 
-    fn allocInPlace(self: *Self, page: *Page, id: PageId, available: usize, size: usize) !Address {
+    fn allocInPage(self: *Self, page: *Page, id: PageId, available: Offset, size: Offset) !Address {
         assert(size <= available);
-        try self.heap.add(FreeSpace{
-            .free = @intCast(available - size - @sizeOf(Offset)),
-            .page = id,
-        });
-        const index = try page.allocIndex(size);
-        return Address{ .page = id, .index = index.index };
+        try self.heap.add(FreeSpace{ .page = id, .free = available - size });
+        return Address{ .page = id, .index = page.alloc(size) };
     }
 
-    fn allocNewPage(self: *Self, size: usize) !Address {
+    fn allocNewPage(self: *Self, size: Offset) !Address {
         const page = try self.page_allocator.create(Page);
         const available = page.init(PageSize);
         const id: PageId = @intCast(self.pages.items.len);
         try self.pages.append(page);
-        return self.allocInPlace(page, id, available, size);
+        return self.allocInPage(page, id, available, size);
     }
 
-    pub fn alloc(self: *Self, size: usize) !Address {
+    pub fn alloc(self: *Self, size: Offset) !Address {
         const free_space = self.heap.removeOrNull();
         return if (free_space) |space|
-            if (space.free < size) self.allocNewPage(size) else self.allocInPlace(self.pages.items[space.page], space.page, space.free, size)
+            if (space.free < size) self.allocNewPage(size) else self.allocInPage(self.pages.items[space.page], space.page, space.free, size)
         else
             self.allocNewPage(size);
     }
@@ -103,7 +98,7 @@ test "init" {
     defer manager.deinit();
     const bytes1 = manager.alloc(10);
     std.debug.print("bytes: {any}\n", .{bytes1});
-    const bytes2 = manager.alloc(55);
-    std.debug.print("bytes: {any}\n", .{bytes2});
+    // const bytes2 = manager.alloc(55);
+    // std.debug.print("bytes: {any}\n", .{bytes2});
     manager.memUsage();
 }
