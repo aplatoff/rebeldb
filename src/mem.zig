@@ -58,10 +58,9 @@ pub const PageManager = struct {
         self.heap.deinit();
     }
 
-    fn freeMem(self: *Self) usize {
+    fn freeMem(self: Self) usize {
         var free: usize = 0;
-        var it = self.heap.iterator();
-        while (it.next()) |page| free += page.data.available();
+        for (self.pages.items) |page| free += page.data.available();
         return free;
     }
 
