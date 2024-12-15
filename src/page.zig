@@ -49,16 +49,20 @@ pub fn ByteAligned(comptime OffsetType: type, comptime IndexType: type) type {
     };
 }
 
-/// FourBitAligned indices -- for Offset values aligned to four bits
-pub fn FourBitAligned(comptime OffsetType: type, comptime IndexType: type) type {
+/// NibbleAligned indices -- for Offset values aligned to four bits
+pub fn NibbleAligned(comptime OffsetType: type, comptime IndexType: type) type {
     return struct {
         const Offset = OffsetType;
         const Index = IndexType;
 
-        // TODO: implement methods below
+        comptime {
+            if (@bitSizeOf(Offset) % 4 != 0) {
+                @compileError("Offset bit-size must be a multiple of 4 for NibbleAligned indexing");
+            }
+        }
+        const offset_nibbles = @bitSizeOf(Offset) / 4;
 
-        // inline fn getIndex(index0: Offset, index: Index) Offset {
-        // }
+        // TODO: Implement NibbleAligned indexing
 
         // inline fn getIndicesStart(index0: Offset, len: Index) Offset {
         // }
