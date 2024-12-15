@@ -1,19 +1,40 @@
-//
 // RebelDB™ • https://rebeldb.com • © 2024 Huly Labs • SPDX-License-Identifier: MIT
+//
+// This code defines a flexible Page abstraction for a database-like storage layer.
+// Pages contain variable-sized values accessible by index. Values are appended forward
+// from the start of the page data region, while their offsets (for indexing) are stored
+// starting from the end of the page and growing backward as more values are inserted.
+//
+// Memory Layout Concept:
+// ----------------------
+// [ Page Metadata | Values Growing Forward --> ... ... <-- Indexes Growing Backward ]
+//
+// The indexing scheme:
+// - Values are appended at increasing offsets from the start of the page.
+// - Index offsets are stored at the end of the page and move backward as new values are added.
+// - An index maps an index number (0, 1, 2, ...) to a stored offset (byte position) of a value.
+//
+// This design allows for flexible configuration of:
+// - Offset storage (Byte aligned Offset integer types and Four-bit aligned).
+// - Capacity handling (static vs. dynamic).
+// - Mutability (read-only vs. mutable append).
 //
 
 const std = @import("std");
 const assert = std.debug.assert;
 
-// Alignment is a type that defines the alignment of the index values on the page.
-
+/// ByteAligned indices -- for Offset values aligned to the byte boundary
 pub fn ByteAligned(comptime OffsetType: type, comptime IndexType: type) type {
     return struct {
         const Offset = OffsetType;
         const Index = IndexType;
 
         inline fn getIndex(index0: Offset, index: Index) Offset {
-            return index0 - index * @sizeOf(Index);
+            return index0 - index * @sizeOf(Offset);
+        }
+
+        inline fn getIndicesStart(index0: Offset, len: Index) Offset {
+            return getIndex(index0, len);
         }
 
         inline fn getOffset(page: [*]const u8, index: Index, index0: Offset) Offset {
@@ -25,6 +46,28 @@ pub fn ByteAligned(comptime OffsetType: type, comptime IndexType: type) type {
             const ptr: *Offset = @alignCast(@ptrCast(&page[getIndex(index0, index)]));
             ptr.* = offset;
         }
+    };
+}
+
+/// FourBitAligned indices -- for Offset values aligned to four bits
+pub fn FourBitAligned(comptime OffsetType: type, comptime IndexType: type) type {
+    return struct {
+        const Offset = OffsetType;
+        const Index = IndexType;
+
+        // TODO: implement methods below
+
+        // inline fn getIndex(index0: Offset, index: Index) Offset {
+        // }
+
+        // inline fn getIndicesStart(index0: Offset, len: Index) Offset {
+        // }
+
+        // inline fn getOffset(page: [*]const u8, index: Index, index0: Offset) Offset {
+        // }
+
+        // inline fn setOffset(page: [*]u8, index: Index, offset: Offset, index0: Offset) void {
+        // }
     };
 }
 
@@ -40,8 +83,8 @@ pub fn StaticCapacity(comptime capacity: comptime_int, comptime Align: type) typ
             return Self{};
         }
 
-        inline fn indexStart(_: Self, len: Index) Offset {
-            return Align.getIndex(capacity - @sizeOf(Offset), len);
+        inline fn indicesStart(_: Self, len: Index) Offset {
+            return Align.getIndicesStart(capacity - @sizeOf(Offset), len);
         }
 
         inline fn getOffset(_: Self, page: [*]const u8, index: Index) Offset {
@@ -66,8 +109,8 @@ pub fn DynamicCapacity(comptime _: comptime_int, comptime Align: type) type {
             return Self{ .index0 = @intCast(size - @sizeOf(Offset)) };
         }
 
-        inline fn indexStart(self: Self, len: Index) Offset {
-            return Align.getIndex(self.index0, len);
+        inline fn indicesStart(self: Self, len: Index) Offset {
+            return Align.getIndicesStart(self.index0, len);
         }
 
         inline fn getOffset(self: Self, page: [*]const u8, index: Index) Offset {
@@ -148,7 +191,7 @@ pub fn Page(comptime Capacity: type, comptime Append: type) type {
         }
 
         pub fn available(self: *Self) Offset {
-            const avail = self.append.available(self.cap.indexStart(self.len));
+            const avail = self.append.available(self.cap.indicesStart(self.len));
             // available can be negative if the page is full and it requires some space for the index
             return @max(avail, @sizeOf(Self)) - @sizeOf(Self);
         }
