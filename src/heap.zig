@@ -92,6 +92,33 @@ pub fn Heap(comptime File: type, Offset: type, Index: type) type {
             for (buf, 0..) |byte, i| val[i] = byte;
             return Object{ .page = self.current_page_id, .index = index };
         }
+
+        // pub fn pushUint(self: *Self, value: u32) !Object {
+        //     const size: Offset = @sizeOf(u32);
+        //     const page = try self.getPage(size);
+        //     const index = page.count();
+        //     const val = page.alloc(size);
+        //     val.* = value;
+        //     return Object{ .page = self.current_page_id, .index = index };
+        // }
+
+        // pub fn push(self: *Self, buf: []const u8) !Object {
+        //     const size: Offset = @intCast(buf.len);
+        //     const page = try self.getPage(size);
+        //     const index = page.count();
+        //     const val = page.alloc(size);
+        //     for (buf, 0..) |byte, i| val[i] = byte;
+        //     return Object{ .page = self.current_page_id, .index = index };
+        // }
+
+        // pub fn pushUint(self: *Self, value: u32) !Object {
+        //     const size: Offset = @sizeOf(u32);
+        //     const page = try self.getPage(size);
+        //     const index = page.count();
+        //     const val = page.alloc(size);
+        //     val.* = value;
+        //     return Object{ .page = self.current_page_id, .index = index };
+        // }
     };
 }
 

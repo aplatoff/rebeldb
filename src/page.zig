@@ -171,11 +171,11 @@ pub fn Page(comptime Capacity: type, comptime Append: type) type {
             return @ptrCast(&val[@sizeOf(Self)]);
         }
 
-        pub fn alloc(self: *Self, size: Offset) []u8 {
+        pub fn alloc(self: *Self, size: Offset) [*]u8 {
             const pos = self.append.push(size);
             self.cap.setOffset(@ptrCast(self), self.len, pos);
             self.len += 1;
-            return self.values()[pos .. pos + size];
+            return @ptrCast(&self.values()[pos]);
         }
 
         // pub fn push(self: *Self, value: []const u8) Index {
@@ -283,8 +283,8 @@ export fn get(page: *const HeapPage, index: PageIndex) [*]const u8 {
 //     _ = page.push(value[0..size]);
 // }
 
-export fn alloc(page: *HeapPage, size: PageOffset) [*]const u8 {
-    return @ptrCast(&page.alloc(size));
+export fn alloc(page: *HeapPage, size: PageOffset) [*]u8 {
+    return page.alloc(size);
 }
 
 export fn available(page: *HeapPage) PageOffset {
