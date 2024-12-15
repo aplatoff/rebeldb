@@ -88,8 +88,7 @@ pub fn Heap(comptime File: type, Offset: type, Index: type) type {
             const size: Offset = @intCast(buf.len);
             const page = try self.getPage(size);
             const index = page.count();
-            const val = page.alloc(size);
-            for (buf, 0..) |byte, i| val[i] = byte;
+            @memcpy(page.alloc(size), buf);
             return Object{ .page = self.current_page_id, .index = index };
         }
 
