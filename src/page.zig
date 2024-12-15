@@ -96,12 +96,10 @@ pub fn Mutable(comptime Offset: type) type {
             return free - self.value;
         }
 
-        inline fn position(self: Self) Offset {
-            return self.value;
-        }
-
-        inline fn advance(self: *Self, size: Offset) void {
+        inline fn advance(self: *Self, size: Offset) Offset {
+            const pos = self.value;
             self.value += size;
+            return pos;
         }
     };
 }
@@ -118,11 +116,7 @@ pub fn Readonly(comptime Offset: type) type {
             return 0;
         }
 
-        inline fn position(_: Self) Offset {
-            unreachable;
-        }
-
-        inline fn advance(_: *Self, _: Offset) Self {
+        inline fn advance(_: *Self, _: Offset) Offset {
             unreachable;
         }
     };
@@ -148,6 +142,10 @@ pub fn Page(comptime Capacity: type, comptime Append: type) type {
             return self.available();
         }
 
+        pub inline fn length(self: Self) Index {
+            return self.len;
+        }
+
         pub fn available(self: *Self) Offset {
             return self.append.available(self.cap.free(self.len) - @sizeOf(Self));
         }
@@ -171,24 +169,20 @@ pub fn Page(comptime Capacity: type, comptime Append: type) type {
             return @ptrCast(&val[@sizeOf(Self)]);
         }
 
-        pub fn push(self: *Self, value: [*]const u8, size: Offset) Index {
-            const index = self.len;
-            const pos = self.append.position();
-            self.cap.setOffset(@ptrCast(self), index, pos);
+        pub fn push(self: *Self, value: [*]const u8, size: Offset) void {
+            const pos = self.append.advance(size);
+            self.cap.setOffset(@ptrCast(self), self.len, pos);
 
             const buf = self.values();
             for (0..size) |i| buf[pos + i] = value[i];
 
-            self.append.advance(size);
             self.len += 1;
-            return index;
         }
 
         pub fn alloc(self: *Self, size: Offset) Index {
             const index = self.len;
-            const pos = self.append.position();
+            const pos = self.append.advance(size);
             self.cap.setOffset(@ptrCast(self), index, pos);
-            self.append.advance(size);
             self.len += 1;
             return index;
         }

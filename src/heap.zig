@@ -91,7 +91,8 @@ pub const PageManager = struct {
 
     pub fn alloc(self: *Self, buf: [*]const u8, size: Offset) !Address {
         const page = try self.getOrAllocPage(size);
-        const address = Address{ .page = page.id, .index = page.data.push(buf, size) };
+        const address = Address{ .page = page.id, .index = page.data.length() };
+        page.data.push(buf, size);
         try self.heap.add(page);
         return address;
     }
