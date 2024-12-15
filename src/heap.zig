@@ -23,8 +23,6 @@ const PageSize = 0x10000;
 
 pub const Address = packed struct { page: PageId, index: Index };
 
-// We're managing pages externally, they can be loaded from disk, etc.
-// This is just a simple example of how to manage pages in memory.
 pub const Heap = struct {
     const Self = @This();
 
@@ -32,7 +30,7 @@ pub const Heap = struct {
     const PageDescriptor = struct { id: PageId, available: Offset };
 
     fn cmpFree(_: void, a: PageDescriptor, b: PageDescriptor) Order {
-        return std.math.order(a.available, b.available);
+        return std.math.order(b.available, a.available);
     }
 
     const PQueue = std.PriorityQueue(PageDescriptor, void, cmpFree);
@@ -95,8 +93,13 @@ test "init" {
     defer manager.deinit();
     const addr1 = try manager.alloc(&data, 10);
     std.debug.print("allocated address: {d}:{d}, free: {d}\n", .{ addr1.page, addr1.index, manager.freeMem() });
-    const addr2 = try manager.alloc(&data, 20);
+    const addr2 = try manager.alloc(&data, 2);
     std.debug.print("allocated address: {d}:{d}, free: {d}\n", .{ addr2.page, addr2.index, manager.freeMem() });
+    for (0..1_000_000) |_| {
+        _ = try manager.alloc(&data, 10);
+        // std.debug.print("allocated address: {d}:{d}, free: {d}\n", .{ a.page, a.index, manager.freeMem() });
+    }
+    std.debug.print("free: {d}\n", .{manager.freeMem()});
 }
 
 // for assemly generation

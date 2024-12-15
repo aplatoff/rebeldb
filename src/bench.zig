@@ -3,6 +3,8 @@
 const std = @import("std");
 const zbench = @import("zbench");
 const page = @import("page.zig");
+const mem = @import("mem.zig");
+const heap = @import("heap.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -11,6 +13,9 @@ const DynamicCapacity = page.DynamicCapacity;
 const ByteAligned = page.ByteAligned;
 const Readonly = page.Readonly;
 const Page = page.Page;
+
+const MemoryFile = mem.MemoryFile;
+const Heap = heap.Heap;
 
 const LARGE_SIZE = 1_000_000;
 
@@ -50,6 +55,16 @@ fn benchGetDynamicByte_16_u8_u8(_: Allocator) void {
     std.mem.doNotOptimizeAway(getDynamicByte_16_u8_u8());
 }
 
+fn benchHeapAllocation(allocator: Allocator) void {
+    const PageSize = 0x10000;
+
+    const mem_file = MemoryFile.init(allocator, PageSize);
+    var data = [_]u8{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+    var manager = Heap.init(allocator, mem_file);
+    defer manager.deinit();
+    for (0..LARGE_SIZE) |_| _ = manager.alloc(&data, 10) catch unreachable;
+}
+
 // Now set up the benchmarks using zbench
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -61,6 +76,7 @@ pub fn main() !void {
 
     try suite.add("Get Static Byte 16 u8 u8", benchGetStaticByte_16_u8_u8, .{});
     try suite.add("Get Dynamic Byte 16 u8 u8", benchGetDynamicByte_16_u8_u8, .{});
+    try suite.add("Heap Allocation", benchHeapAllocation, .{});
 
     const stdout = std.io.getStdOut().writer();
     try suite.run(stdout);

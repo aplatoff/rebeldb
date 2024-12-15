@@ -40,7 +40,7 @@ pub fn StaticCapacity(comptime capacity: comptime_int, comptime Align: type) typ
             return Self{};
         }
 
-        inline fn free(_: Self, len: Index) Offset {
+        inline fn indexStart(_: Self, len: Index) Offset {
             return Align.getIndex(capacity - @sizeOf(Offset), len);
         }
 
@@ -66,7 +66,7 @@ pub fn DynamicCapacity(comptime _: comptime_int, comptime Align: type) type {
             return Self{ .index0 = @intCast(size - @sizeOf(Offset)) };
         }
 
-        inline fn free(self: Self, len: Index) Offset {
+        inline fn indexStart(self: Self, len: Index) Offset {
             return Align.getIndex(self.index0, len);
         }
 
@@ -147,7 +147,9 @@ pub fn Page(comptime Capacity: type, comptime Append: type) type {
         }
 
         pub fn available(self: *Self) Offset {
-            return self.append.available(self.cap.free(self.len) - @sizeOf(Self));
+            const avail = self.append.available(self.cap.indexStart(self.len));
+            // available can be negative if the page is full and it requires some space for the index
+            return @max(avail, @sizeOf(Self)) - @sizeOf(Self);
         }
 
         // Read methods
