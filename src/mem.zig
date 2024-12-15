@@ -3,34 +3,35 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-pub const MemoryFile = struct {
-    const Self = @This();
-    const Pages = std.ArrayList([*]u8);
+pub fn MemoryFile(Size: comptime_int) type {
+    return struct {
+        pub const PageSize = Size;
+        pub const PageId = u32;
 
-    pages: Pages,
-    page_size: usize,
+        const Self = @This();
+        const Pages = std.ArrayList([*]u8);
 
-    pub fn init(allocator: Allocator, page_size: usize) MemoryFile {
-        return MemoryFile{
-            .pages = Pages.init(allocator),
-            .page_size = page_size,
-        };
-    }
+        pages: Pages,
 
-    pub fn deinit(self: Self) void {
-        for (self.pages.items) |page| std.heap.page_allocator.free(page[0..self.page_size]);
-        self.pages.deinit();
-    }
+        pub fn init(allocator: Allocator) Self {
+            return Self{ .pages = Pages.init(allocator) };
+        }
 
-    pub fn alloc(self: *Self) !struct { data: [*]u8, id: usize } {
-        const page = try std.heap.page_allocator.alloc(u8, self.page_size);
-        const data: [*]u8 = @ptrCast(page);
-        const id = self.pages.items.len;
-        try self.pages.append(data);
-        return .{ .data = data, .id = id };
-    }
+        pub fn deinit(self: Self) void {
+            for (self.pages.items) |page| std.heap.page_allocator.free(page[0..PageSize]);
+            self.pages.deinit();
+        }
 
-    pub fn get(self: Self, id: usize) [*]u8 {
-        return self.pages.items[id];
-    }
-};
+        pub fn alloc(self: *Self) !struct { data: [*]u8, id: PageId } {
+            const page = try std.heap.page_allocator.alloc(u8, PageSize);
+            const data: [*]u8 = @ptrCast(page);
+            const id = self.pages.items.len;
+            try self.pages.append(data);
+            return .{ .data = data, .id = @intCast(id) };
+        }
+
+        pub fn get(self: Self, id: PageId) [*]u8 {
+            return self.pages.items[id];
+        }
+    };
+}

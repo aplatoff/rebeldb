@@ -55,14 +55,26 @@ fn benchGetDynamicByte_16_u8_u8(_: Allocator) void {
     std.mem.doNotOptimizeAway(getDynamicByte_16_u8_u8());
 }
 
-fn benchHeapAllocation(allocator: Allocator) void {
-    const PageSize = 0x10000;
+fn benchHeapAllocation64K(allocator: Allocator) void {
+    const Mem64K = MemoryFile(0x10000);
+    var mem_file = Mem64K.init(allocator);
+    defer mem_file.deinit();
+    var hp = Heap(Mem64K, u16, u16).init(allocator, &mem_file);
+    defer hp.deinit();
 
-    const mem_file = MemoryFile.init(allocator, PageSize);
     var data = [_]u8{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
-    var manager = Heap.init(allocator, mem_file);
-    defer manager.deinit();
-    for (0..LARGE_SIZE) |_| _ = manager.alloc(&data, 10) catch unreachable;
+    for (0..LARGE_SIZE) |_| _ = hp.alloc(&data, 10) catch unreachable;
+}
+
+fn benchHeapAllocation4096(allocator: Allocator) void {
+    const Mem = MemoryFile(4096);
+    var mem_file = Mem.init(allocator);
+    defer mem_file.deinit();
+    var hp = Heap(Mem, u16, u16).init(allocator, &mem_file);
+    defer hp.deinit();
+
+    var data = [_]u8{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+    for (0..LARGE_SIZE) |_| _ = hp.alloc(&data, 10) catch unreachable;
 }
 
 // Now set up the benchmarks using zbench
@@ -76,7 +88,8 @@ pub fn main() !void {
 
     try suite.add("Get Static Byte 16 u8 u8", benchGetStaticByte_16_u8_u8, .{});
     try suite.add("Get Dynamic Byte 16 u8 u8", benchGetDynamicByte_16_u8_u8, .{});
-    try suite.add("Heap Allocation", benchHeapAllocation, .{});
+    try suite.add("Heap Allocation 64K", benchHeapAllocation64K, .{});
+    try suite.add("Heap Allocation 4096", benchHeapAllocation4096, .{});
 
     const stdout = std.io.getStdOut().writer();
     try suite.run(stdout);

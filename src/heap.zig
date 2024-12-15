@@ -13,97 +13,96 @@ const DynamicCapacity = pg.DynamicCapacity;
 const ByteAligned = pg.ByteAligned;
 const Mutable = pg.Mutable;
 
-const MemoryFile = mem.MemoryFile;
+pub fn Heap(comptime File: type, Offset: type, Index: type) type {
+    return struct {
+        const Self = @This();
 
-const Offset = u16; // 64KB max page size
-const Index = u16;
+        const PageSize = File.PageSize;
+        const PageId = File.PageId;
 
-const PageId = u32;
-const PageSize = 0x10000;
+        pub const Address = packed struct { page: PageId, index: Index };
 
-pub const Address = packed struct { page: PageId, index: Index };
+        const Page = pg.Page(StaticCapacity(PageSize, ByteAligned(Offset, Index)), Mutable(Offset));
+        const PageDescriptor = struct { available: Offset, id: PageId };
 
-pub const Heap = struct {
-    const Self = @This();
+        fn cmpFree(_: void, a: PageDescriptor, b: PageDescriptor) Order {
+            return std.math.order(b.available, a.available);
+        }
 
-    const Page = pg.Page(StaticCapacity(PageSize, ByteAligned(Offset, Index)), Mutable(Offset));
-    const PageDescriptor = struct { id: PageId, available: Offset };
+        const PQueue = std.PriorityQueue(PageDescriptor, void, cmpFree);
 
-    fn cmpFree(_: void, a: PageDescriptor, b: PageDescriptor) Order {
-        return std.math.order(b.available, a.available);
-    }
+        heap: PQueue,
+        file: *File,
 
-    const PQueue = std.PriorityQueue(PageDescriptor, void, cmpFree);
+        pub fn init(allocator: Allocator, pages: *File) Self {
+            return Self{
+                .heap = PQueue.init(allocator, {}),
+                .file = pages,
+            };
+        }
 
-    heap: PQueue,
-    pages: MemoryFile,
+        pub fn deinit(self: Self) void {
+            self.heap.deinit();
+        }
 
-    pub fn init(allocator: Allocator, memory_file: MemoryFile) Heap {
-        return Heap{
-            .heap = PQueue.init(allocator, {}),
-            .pages = memory_file,
-        };
-    }
+        fn freeMem(self: *Self) usize {
+            var free: usize = 0;
+            var iter = self.heap.iterator();
+            while (iter.next()) |page| free += page.available;
+            return free;
+        }
 
-    pub fn deinit(self: Self) void {
-        self.pages.deinit();
-        self.heap.deinit();
-    }
+        fn allocNewPage(self: *Self) !PageDescriptor {
+            const raw = try self.file.alloc();
+            const page: *Page = @alignCast(@ptrCast(raw.data));
+            return PageDescriptor{ .id = @intCast(raw.id), .available = page.init(PageSize) };
+        }
 
-    fn freeMem(self: *Self) usize {
-        var free: usize = 0;
-        var iter = self.heap.iterator();
-        while (iter.next()) |page| free += page.available;
-        return free;
-    }
-
-    fn allocNewPage(self: *Self) !PageDescriptor {
-        const raw = try self.pages.alloc();
-        const page: *Page = @alignCast(@ptrCast(raw.data));
-        return PageDescriptor{ .id = @intCast(raw.id), .available = page.init(PageSize) };
-    }
-
-    fn getOrAllocPage(self: *Self, size: Offset) !PageDescriptor {
-        return if (self.heap.peek()) |page|
-            if (page.available < size)
-                self.allocNewPage()
+        fn getOrAllocPage(self: *Self, size: Offset) !PageDescriptor {
+            return if (self.heap.peek()) |page|
+                if (page.available < size)
+                    self.allocNewPage()
+                else
+                    self.heap.remove()
             else
-                self.heap.remove()
-        else
-            self.allocNewPage();
-    }
+                self.allocNewPage();
+        }
 
-    pub fn alloc(self: *Self, buf: [*]const u8, size: Offset) !Address {
-        var desc = try self.getOrAllocPage(size);
-        const page: *Page = @alignCast(@ptrCast(self.pages.get(desc.id)));
-        const address = Address{ .page = desc.id, .index = page.length() };
-        page.push(buf, size);
-        desc.available = page.available();
-        try self.heap.add(desc);
-        return address;
-    }
-};
+        pub fn alloc(self: *Self, buf: [*]const u8, size: Offset) !Address {
+            var desc = try self.getOrAllocPage(size);
+            const page: *Page = @alignCast(@ptrCast(self.file.get(desc.id)));
+            const address = Address{ .page = desc.id, .index = page.length() };
+            page.push(buf, size);
+            desc.available = page.available();
+            try self.heap.add(desc);
+            return address;
+        }
+    };
+}
 
 const testing = std.testing;
+const MemoryFile = mem.MemoryFile;
+const Mem64K = MemoryFile(0x10000);
 
 test "init" {
-    const mem_file = MemoryFile.init(testing.allocator, PageSize);
     var data = [_]u8{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
-    var manager = Heap.init(testing.allocator, mem_file);
-    defer manager.deinit();
-    const addr1 = try manager.alloc(&data, 10);
-    std.debug.print("allocated address: {d}:{d}, free: {d}\n", .{ addr1.page, addr1.index, manager.freeMem() });
-    const addr2 = try manager.alloc(&data, 2);
-    std.debug.print("allocated address: {d}:{d}, free: {d}\n", .{ addr2.page, addr2.index, manager.freeMem() });
+    var mem_file = Mem64K.init(testing.allocator);
+    defer mem_file.deinit();
+    var heap = Heap(Mem64K, u16, u16).init(testing.allocator, &mem_file);
+    defer heap.deinit();
+    const addr1 = try heap.alloc(&data, 10);
+    std.debug.print("allocated address: {d}:{d}, free: {d}\n", .{ addr1.page, addr1.index, heap.freeMem() });
+    const addr2 = try heap.alloc(&data, 2);
+    std.debug.print("allocated address: {d}:{d}, free: {d}\n", .{ addr2.page, addr2.index, heap.freeMem() });
     for (0..1_000_000) |_| {
-        _ = try manager.alloc(&data, 10);
+        _ = try heap.alloc(&data, 10);
         // std.debug.print("allocated address: {d}:{d}, free: {d}\n", .{ a.page, a.index, manager.freeMem() });
     }
-    std.debug.print("free: {d}\n", .{manager.freeMem()});
+    std.debug.print("free: {d}\n", .{heap.freeMem()});
 }
 
 // for assemly generation
 // zig build-lib -O ReleaseSmall -femit-asm=page.asm src/mem.zig
-export fn heapAlloc(heap: *Heap, buf: [*]const u8, size: Offset) void {
+export fn heapAlloc(heap: *Heap(Mem64K, u16, u16), buf: [*]const u8, size: u16) void {
     _ = heap.alloc(buf, size) catch unreachable;
 }
