@@ -84,9 +84,13 @@ pub fn Heap(comptime File: type, Offset: type, Index: type) type {
             return page.alloc(size);
         }
 
-        pub fn push(self: *Self, buf: [*]const u8, size: Offset) !Object {
+        pub fn push(self: *Self, buf: []const u8) !Object {
+            const size: Offset = @intCast(buf.len);
             const page = try self.getPage(size);
-            return Object{ .page = self.current_page_id, .index = page.push(buf, size) };
+            const index = page.count();
+            const val = page.alloc(size);
+            for (buf, 0..) |byte, i| val[i] = byte;
+            return Object{ .page = self.current_page_id, .index = index };
         }
     };
 }
@@ -105,12 +109,12 @@ test "init" {
 
     std.debug.print("{d} {d}\n", .{ @sizeOf(Heap64K.Object), @sizeOf(Heap64K.PageDescriptor) });
 
-    const addr1 = try heap.push(&data, 10);
+    const addr1 = try heap.push(&data);
     std.debug.print("allocated address: {d}:{d}, free: {d}\n", .{ addr1.page, addr1.index, heap.freeMem() });
-    const addr2 = try heap.push(&data, 2);
+    const addr2 = try heap.push(&data);
     std.debug.print("allocated address: {d}:{d}, free: {d}\n", .{ addr2.page, addr2.index, heap.freeMem() });
     for (0..120_000) |_| {
-        _ = try heap.push(&data, 7);
+        _ = try heap.push(&data);
         // std.debug.print("allocated address: {d}:{d}, free: {d}\n", .{ a.page, a.index, heap.freeMem() });
     }
     std.debug.print("free: {d}\n", .{heap.freeMem()});
@@ -119,5 +123,5 @@ test "init" {
 // for assemly generation
 // zig build-lib -O ReleaseSmall -femit-asm=page.asm src/mem.zig
 export fn heapAlloc(heap: *Heap(Mem64K, u16, u16), buf: [*]const u8, size: u16) void {
-    _ = heap.push(buf, size) catch unreachable;
+    _ = heap.push(buf[0..size]) catch unreachable;
 }
