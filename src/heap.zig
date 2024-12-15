@@ -23,7 +23,7 @@ pub fn Heap(comptime File: type, Offset: type, Index: type) type {
         pub const Address = packed struct { page: PageId, index: Index };
 
         const Page = pg.Page(StaticCapacity(PageSize, ByteAligned(Offset, Index)), Mutable(Offset));
-        const PageDescriptor = struct { available: Offset, id: PageId };
+        const PageDescriptor = packed struct { available: Offset, id: PageId };
 
         fn cmpFree(_: void, a: PageDescriptor, b: PageDescriptor) Order {
             return std.math.order(b.available, a.available);
@@ -61,13 +61,6 @@ pub fn Heap(comptime File: type, Offset: type, Index: type) type {
             return PageDescriptor{ .id = @intCast(raw.id), .available = page.init(PageSize) };
         }
 
-        fn getOrAllocPage(self: *Self, size: Offset) !PageDescriptor {
-            return if (self.heap.peek()) |page|
-                if (page.available < size) self.allocNewPage() else self.heap.remove()
-            else
-                self.allocNewPage();
-        }
-
         pub fn alloc(self: *Self, buf: [*]const u8, size: Offset) !Address {
             if (self.current_page) |page| {
                 const available = page.available();
@@ -76,7 +69,12 @@ pub fn Heap(comptime File: type, Offset: type, Index: type) type {
                 else
                     try self.heap.add(PageDescriptor{ .id = self.current_page_id, .available = available });
             }
-            const desc = try self.getOrAllocPage(size);
+
+            const desc = if (self.heap.peek()) |page|
+                if (page.available < size) try self.allocNewPage() else self.heap.remove()
+            else
+                try self.allocNewPage();
+
             const page: *Page = @alignCast(@ptrCast(self.file.get(desc.id)));
             self.current_page_id = desc.id;
             self.current_page = page;
