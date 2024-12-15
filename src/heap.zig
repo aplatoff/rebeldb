@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const pg = @import("page.zig");
+const mem = @import("mem.zig");
 
 const Allocator = std.mem.Allocator;
 const Order = std.math.Order;
@@ -11,6 +12,8 @@ const StaticCapacity = pg.StaticCapacity;
 const DynamicCapacity = pg.DynamicCapacity;
 const ByteAligned = pg.ByteAligned;
 const Mutable = pg.Mutable;
+
+const MemoryFile = mem.MemoryFile;
 
 const Offset = u16; // 64KB max page size
 const Index = u16;
@@ -22,59 +25,49 @@ pub const Address = packed struct { page: PageId, index: Index };
 
 // We're managing pages externally, they can be loaded from disk, etc.
 // This is just a simple example of how to manage pages in memory.
-pub const PageManager = struct {
+pub const Heap = struct {
     const Self = @This();
 
-    const Header = pg.Page(StaticCapacity(PageSize - @sizeOf(PageId), ByteAligned(Offset, Index)), Mutable(Offset));
+    const Page = pg.Page(StaticCapacity(PageSize, ByteAligned(Offset, Index)), Mutable(Offset));
+    const PageDescriptor = struct { id: PageId, available: Offset };
 
-    const Page = struct {
-        id: PageId,
-        data: Header,
-        buf: [PageSize - @sizeOf(PageId) - @sizeOf(Header)]u8,
-    };
-
-    fn cmpFree(_: void, a: *Page, b: *Page) Order {
-        return std.math.order(a.data.available(), b.data.available());
+    fn cmpFree(_: void, a: PageDescriptor, b: PageDescriptor) Order {
+        return std.math.order(a.available, b.available);
     }
 
-    const Pages = std.ArrayList(*Page);
-    const Heap = std.PriorityQueue(*Page, void, cmpFree);
+    const PQueue = std.PriorityQueue(PageDescriptor, void, cmpFree);
 
-    pages: Pages,
-    heap: Heap,
-    page_allocator: Allocator,
+    heap: PQueue,
+    pages: MemoryFile,
 
-    pub fn init(allocator: Allocator, page_allocator: Allocator) PageManager {
-        return PageManager{
-            .pages = Pages.init(allocator),
-            .heap = Heap.init(allocator, {}),
-            .page_allocator = page_allocator,
+    pub fn init(allocator: Allocator, memory_file: MemoryFile) Heap {
+        return Heap{
+            .heap = PQueue.init(allocator, {}),
+            .pages = memory_file,
         };
     }
 
     pub fn deinit(self: Self) void {
-        for (self.pages.items) |page| self.page_allocator.destroy(page);
         self.pages.deinit();
         self.heap.deinit();
     }
 
-    fn freeMem(self: Self) usize {
+    fn freeMem(self: *Self) usize {
         var free: usize = 0;
-        for (self.pages.items) |page| free += page.data.available();
+        var iter = self.heap.iterator();
+        while (iter.next()) |page| free += page.available;
         return free;
     }
 
-    fn allocNewPage(self: *Self) !*Page {
-        const page = try self.page_allocator.create(Page);
-        page.id = @intCast(self.pages.items.len);
-        _ = page.data.init(PageSize - @sizeOf(PageId));
-        try self.pages.append(page);
-        return page;
+    fn allocNewPage(self: *Self) !PageDescriptor {
+        const raw = try self.pages.alloc();
+        const page: *Page = @alignCast(@ptrCast(raw.data));
+        return PageDescriptor{ .id = @intCast(raw.id), .available = page.init(PageSize) };
     }
 
-    fn getOrAllocPage(self: *Self, size: Offset) !*Page {
+    fn getOrAllocPage(self: *Self, size: Offset) !PageDescriptor {
         return if (self.heap.peek()) |page|
-            if (page.data.available() < size)
+            if (page.available < size)
                 self.allocNewPage()
             else
                 self.heap.remove()
@@ -82,18 +75,13 @@ pub const PageManager = struct {
             self.allocNewPage();
     }
 
-    // pub fn allocEmpty(self: *Self, size: Offset) !Address {
-    //     const page = try self.getOrAllocPage(size);
-    //     const address = Address{ .page = page.id, .index = page.data.alloc(size) };
-    //     try self.heap.add(page);
-    //     return address;
-    // }
-
     pub fn alloc(self: *Self, buf: [*]const u8, size: Offset) !Address {
-        const page = try self.getOrAllocPage(size);
-        const address = Address{ .page = page.id, .index = page.data.length() };
-        page.data.push(buf, size);
-        try self.heap.add(page);
+        var desc = try self.getOrAllocPage(size);
+        const page: *Page = @alignCast(@ptrCast(self.pages.get(desc.id)));
+        const address = Address{ .page = desc.id, .index = page.length() };
+        page.push(buf, size);
+        desc.available = page.available();
+        try self.heap.add(desc);
         return address;
     }
 };
@@ -101,8 +89,9 @@ pub const PageManager = struct {
 const testing = std.testing;
 
 test "init" {
+    const mem_file = MemoryFile.init(testing.allocator, PageSize);
     var data = [_]u8{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
-    var manager = PageManager.init(testing.allocator, testing.allocator);
+    var manager = Heap.init(testing.allocator, mem_file);
     defer manager.deinit();
     const addr1 = try manager.alloc(&data, 10);
     std.debug.print("allocated address: {d}:{d}, free: {d}\n", .{ addr1.page, addr1.index, manager.freeMem() });
@@ -112,6 +101,6 @@ test "init" {
 
 // for assemly generation
 // zig build-lib -O ReleaseSmall -femit-asm=page.asm src/mem.zig
-export fn heapAlloc(heap: *PageManager, buf: [*]const u8, size: Offset) void {
+export fn heapAlloc(heap: *Heap, buf: [*]const u8, size: Offset) void {
     _ = heap.alloc(buf, size) catch unreachable;
 }
