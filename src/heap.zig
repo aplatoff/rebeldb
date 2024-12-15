@@ -33,6 +33,8 @@ pub fn Heap(comptime File: type, Offset: type, Index: type) type {
 
         heap: PQueue,
         file: *File,
+        current_page_id: PageId = undefined,
+        current_page: ?*Page = null,
 
         pub fn init(allocator: Allocator, pages: *File) Self {
             return Self{
@@ -69,12 +71,20 @@ pub fn Heap(comptime File: type, Offset: type, Index: type) type {
         }
 
         pub fn alloc(self: *Self, buf: [*]const u8, size: Offset) !Address {
-            var desc = try self.getOrAllocPage(size);
+            if (self.current_page) |page| {
+                const available = page.available();
+                if (available >= size) {
+                    const address = Address{ .page = self.current_page_id, .index = page.length() };
+                    page.push(buf, size);
+                    return address;
+                } else try self.heap.add(PageDescriptor{ .id = self.current_page_id, .available = available });
+            }
+            const desc = try self.getOrAllocPage(size);
             const page: *Page = @alignCast(@ptrCast(self.file.get(desc.id)));
             const address = Address{ .page = desc.id, .index = page.length() };
+            self.current_page_id = desc.id;
+            self.current_page = page;
             page.push(buf, size);
-            desc.available = page.available();
-            try self.heap.add(desc);
             return address;
         }
     };
@@ -94,9 +104,9 @@ test "init" {
     std.debug.print("allocated address: {d}:{d}, free: {d}\n", .{ addr1.page, addr1.index, heap.freeMem() });
     const addr2 = try heap.alloc(&data, 2);
     std.debug.print("allocated address: {d}:{d}, free: {d}\n", .{ addr2.page, addr2.index, heap.freeMem() });
-    for (0..1_000_000) |_| {
-        _ = try heap.alloc(&data, 10);
-        // std.debug.print("allocated address: {d}:{d}, free: {d}\n", .{ a.page, a.index, manager.freeMem() });
+    for (0..120_000) |_| {
+        _ = try heap.alloc(&data, 7);
+        // std.debug.print("allocated address: {d}:{d}, free: {d}\n", .{ a.page, a.index, heap.freeMem() });
     }
     std.debug.print("free: {d}\n", .{heap.freeMem()});
 }
