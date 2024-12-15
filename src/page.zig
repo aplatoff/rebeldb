@@ -126,8 +126,9 @@ pub fn Readonly(comptime Offset: type) type {
 pub fn Page(comptime Capacity: type, comptime Append: type) type {
     return packed struct {
         const Self = @This();
-        const Offset = Capacity.Offset;
-        const Index = Capacity.Index;
+
+        pub const Offset = Capacity.Offset;
+        pub const Index = Capacity.Index;
 
         len: Index,
         cap: Capacity,
@@ -159,7 +160,7 @@ pub fn Page(comptime Capacity: type, comptime Append: type) type {
             return @ptrCast(&val[@sizeOf(Self)]);
         }
 
-        pub fn get(self: *const Self, index: Index) [*]const u8 {
+        pub inline fn get(self: *const Self, index: Index) [*]const u8 {
             const page: [*]const u8 = @ptrCast(self);
             return @ptrCast(&self.constValues()[self.cap.getOffset(page, index)]);
         }
@@ -171,11 +172,11 @@ pub fn Page(comptime Capacity: type, comptime Append: type) type {
             return @ptrCast(&val[@sizeOf(Self)]);
         }
 
-        pub fn alloc(self: *Self, size: Offset) [*]u8 {
+        pub inline fn alloc(self: *Self, size: Offset) []u8 {
             const pos = self.append.push(size);
             self.cap.setOffset(@ptrCast(self), self.len, pos);
             self.len += 1;
-            return @ptrCast(&self.values()[pos]);
+            return self.values()[pos .. pos + size];
         }
 
         // pub fn push(self: *Self, value: []const u8) Index {
@@ -283,8 +284,8 @@ export fn get(page: *const HeapPage, index: PageIndex) [*]const u8 {
 //     _ = page.push(value[0..size]);
 // }
 
-export fn alloc(page: *HeapPage, size: PageOffset) [*]u8 {
-    return page.alloc(size);
+export fn alloc(page: *HeapPage, size: PageOffset) [*]const u8 {
+    return @ptrCast(&page.alloc(size));
 }
 
 export fn available(page: *HeapPage) PageOffset {
