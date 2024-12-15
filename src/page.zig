@@ -142,9 +142,9 @@ pub fn Page(comptime Capacity: type, comptime Append: type) type {
             return self.available();
         }
 
-        pub inline fn length(self: Self) Index {
-            return self.len;
-        }
+        // pub inline fn length(self: Self) Index {
+        //     return self.len;
+        // }
 
         pub fn available(self: *Self) Offset {
             const avail = self.append.available(self.cap.indexStart(self.len));
@@ -171,23 +171,31 @@ pub fn Page(comptime Capacity: type, comptime Append: type) type {
             return @ptrCast(&val[@sizeOf(Self)]);
         }
 
-        pub fn push(self: *Self, value: [*]const u8, size: Offset) void {
+        inline fn alloc(self: *Self, size: Offset) [*]u8 {
             const pos = self.append.push(size);
             self.cap.setOffset(@ptrCast(self), self.len, pos);
-
-            const buf = self.values();
-            for (0..size) |i| buf[pos + i] = value[i];
-
             self.len += 1;
+            return @ptrCast(&self.values()[pos]);
         }
 
-        pub fn alloc(self: *Self, size: Offset) Index {
+        pub fn push(self: *Self, value: [*]const u8, size: Offset) Index {
             const index = self.len;
-            const pos = self.append.push(size);
-            self.cap.setOffset(@ptrCast(self), index, pos);
-            self.len += 1;
+            const buf = self.alloc(size);
+            for (0..size) |i| buf[i] = value[i];
             return index;
         }
+
+        // pub fn push(self: *Self, value: [*]const u8, size: Offset) Index {
+        //     const index = self.len;
+        //     const pos = self.append.push(size);
+        //     self.cap.setOffset(@ptrCast(self), index, pos);
+
+        //     const buf = self.values();
+        //     for (0..size) |i| buf[pos + i] = value[i];
+
+        //     self.len += 1;
+        //     return index;
+        // }
     };
 }
 
@@ -275,7 +283,7 @@ export fn push(page: *HeapPage, value: [*]const u8, size: PageOffset) void {
     _ = page.push(value, size);
 }
 
-export fn alloc(page: *HeapPage, size: PageOffset) PageIndex {
+export fn alloc(page: *HeapPage, size: PageOffset) [*]u8 {
     return page.alloc(size);
 }
 

@@ -31,10 +31,11 @@ pub fn Heap(comptime File: type, Offset: type, Index: type) type {
 
         const PQueue = std.PriorityQueue(PageDescriptor, void, cmpFree);
 
-        heap: PQueue,
-        file: *File,
-        current_page_id: PageId = undefined,
         current_page: ?*Page = null,
+        current_page_id: PageId = undefined,
+
+        file: *File,
+        heap: PQueue,
 
         pub fn init(allocator: Allocator, pages: *File) Self {
             return Self{
@@ -70,19 +71,16 @@ pub fn Heap(comptime File: type, Offset: type, Index: type) type {
         pub fn alloc(self: *Self, buf: [*]const u8, size: Offset) !Address {
             if (self.current_page) |page| {
                 const available = page.available();
-                if (available >= size) {
-                    const address = Address{ .page = self.current_page_id, .index = page.length() };
-                    page.push(buf, size);
-                    return address;
-                } else try self.heap.add(PageDescriptor{ .id = self.current_page_id, .available = available });
+                if (available >= size)
+                    return Address{ .page = self.current_page_id, .index = page.push(buf, size) }
+                else
+                    try self.heap.add(PageDescriptor{ .id = self.current_page_id, .available = available });
             }
             const desc = try self.getOrAllocPage(size);
             const page: *Page = @alignCast(@ptrCast(self.file.get(desc.id)));
-            const address = Address{ .page = desc.id, .index = page.length() };
             self.current_page_id = desc.id;
             self.current_page = page;
-            page.push(buf, size);
-            return address;
+            return Address{ .page = desc.id, .index = page.push(buf, size) };
         }
     };
 }
