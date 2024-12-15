@@ -63,7 +63,7 @@ fn benchHeapAllocation64K(allocator: Allocator) void {
     defer hp.deinit();
 
     var data = [_]u8{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
-    for (0..LARGE_SIZE) |_| _ = hp.alloc(&data, 10) catch unreachable;
+    for (0..LARGE_SIZE) |_| _ = hp.push(&data, 10) catch unreachable;
 }
 
 fn benchHeapAllocation4096(allocator: Allocator) void {
@@ -74,7 +74,7 @@ fn benchHeapAllocation4096(allocator: Allocator) void {
     defer hp.deinit();
 
     var data = [_]u8{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
-    for (0..LARGE_SIZE) |_| _ = hp.alloc(&data, 10) catch unreachable;
+    for (0..LARGE_SIZE) |_| _ = hp.push(&data, 10) catch unreachable;
 }
 
 // Now set up the benchmarks using zbench

@@ -171,7 +171,7 @@ pub fn Page(comptime Capacity: type, comptime Append: type) type {
             return @ptrCast(&val[@sizeOf(Self)]);
         }
 
-        inline fn alloc(self: *Self, size: Offset) [*]u8 {
+        pub fn alloc(self: *Self, size: Offset) [*]u8 {
             const pos = self.append.push(size);
             self.cap.setOffset(@ptrCast(self), self.len, pos);
             self.len += 1;
