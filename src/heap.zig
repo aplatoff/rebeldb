@@ -62,10 +62,7 @@ pub fn Heap(comptime File: type, Offset: type, Index: type) type {
 
         fn getOrAllocPage(self: *Self, size: Offset) !PageDescriptor {
             return if (self.heap.peek()) |page|
-                if (page.available < size)
-                    self.allocNewPage()
-                else
-                    self.heap.remove()
+                if (page.available < size) self.allocNewPage() else self.heap.remove()
             else
                 self.allocNewPage();
         }
