@@ -100,8 +100,9 @@ pub fn NibbleAligned(comptime OffsetType: type, comptime IndexType: type) type {
 
             const aligned: *Aligned = @alignCast(@ptrCast(&page[start_byte]));
             const shift = nibble_in_byte << 2;
-            const raw = aligned.* & ~(mask << shift);
-            aligned.* = raw | (offset << shift);
+            const raw = aligned.* & ~(mask << @intCast(shift));
+            const shifted_offset: Aligned = @as(Aligned, @intCast(offset)) << @intCast(shift);
+            aligned.* = raw | shifted_offset;
         }
     };
 }
