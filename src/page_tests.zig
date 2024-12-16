@@ -314,7 +314,66 @@ test "verify no overlap for multiple allocations" {
     try testing.expectEqual(@as(u8, 81), last_val[1]);
 }
 
-// ---------------------------------------------
-// If desired, add more tests for extreme cases, large indexes, etc.
-// ---------------------------------------------
-//
+test "static nibble aligned u12 offsets: append multiple values" {
+    // This test ensures that nibble-aligned indexing with u12 offsets works correctly for multiple appended values.
+    // We'll use a static page of size 64 bytes for simplicity.
+    var data = [_]u8{0} ** 64;
+
+    // Use NibbleAligned(u12, u8) and Mutable(u12) to allow appends.
+    // Using u8 as Index is fine for a small number of values.
+    const StaticPage = Page(Static(64), NibbleAligned(u12, u8), Mutable(u12));
+    const page_ptr: *StaticPage = @alignCast(@ptrCast(&data));
+
+    // Initialize the page.
+    const avail = page_ptr.init(64);
+    // With nibble-aligned u12 offsets, indexing overhead is slightly complex. We won't assert the exact initial avail here.
+    // Just ensure it's positive and roughly equals total capacity minus struct size minus one offset space.
+    try testing.expect(avail > 50); // sanity check, since @sizeOf(u12)=2 bytes, one index nibble alignment overhead is small.
+
+    // Append four values with varying sizes to test indexing:
+    // Value0: length = 5 bytes
+    // Value1: length = 10 bytes
+    // Value2: length = 8 bytes
+    // Value3: length = 12 bytes
+
+    // Append Value0
+    const val0 = page_ptr.alloc(5);
+    for (val0, 0..) |*b, i| b.* = @intCast(i + 10); // Fill with pattern starting at 10
+    try testing.expectEqual(@as(u8, 10), page_ptr.get(0)[0]);
+    try testing.expectEqual(@as(u8, 14), page_ptr.get(0)[4]);
+
+    // Append Value1
+    const val1 = page_ptr.alloc(10);
+    for (val1, 0..) |*b, i| b.* = @intCast(i + 50); // Fill with pattern starting at 50
+    try testing.expectEqual(@as(u8, 50), page_ptr.get(1)[0]);
+    try testing.expectEqual(@as(u8, 59), page_ptr.get(1)[9]);
+
+    // Append Value2
+    const val2 = page_ptr.alloc(8);
+    for (val2, 0..) |*b, i| b.* = @intCast(i + 100); // Fill with pattern starting at 100
+    try testing.expectEqual(@as(u8, 100), page_ptr.get(2)[0]);
+    try testing.expectEqual(@as(u8, 107), page_ptr.get(2)[7]);
+
+    // Append Value3
+    const val3 = page_ptr.alloc(12);
+    for (val3, 0..) |*b, i| b.* = @intCast(i + 200); // Fill with pattern starting at 200
+    try testing.expectEqual(@as(u8, 200), page_ptr.get(3)[0]);
+    try testing.expectEqual(@as(u8, 211), page_ptr.get(3)[11]);
+
+    // Check counts and indexing
+    try testing.expectEqual(4, page_ptr.count());
+
+    // Check that no values overlap and indexing didn't get corrupted:
+    // Ensure value0 is still intact
+    try testing.expectEqual(@as(u8, 10), page_ptr.get(0)[0]);
+    try testing.expectEqual(@as(u8, 14), page_ptr.get(0)[4]);
+
+    // Check available space after all allocations:
+    // Let's do a rough check. We've allocated total of 5+10+8+12 = 35 bytes for values.
+    // We have 4 indexes. Each index = 12 bits = 1.5 bytes. For 4 indexes, total indexing = 6 bytes at the end.
+    // Used = @sizeOf(StaticPage) + @sizeOf(u12) [for mut offset state] + 35 (values) + 6 (index nibbles)
+    const used = @sizeOf(StaticPage) + @sizeOf(u12) + 35 + 6;
+    try testing.expectEqual(64 - used, page_ptr.available());
+
+    // Everything retrieved matches what we wrote, so nibble-aligned indexing with u12 offsets works.
+}

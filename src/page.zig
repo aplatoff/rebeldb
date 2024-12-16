@@ -80,8 +80,10 @@ pub fn NibbleAligned(comptime OffsetType: type, comptime IndexType: type) type {
             const start_byte = start_nibble / 2;
             const nibble_in_byte = start_nibble % 2;
 
-            const aligned: *const Aligned = @alignCast(@ptrCast(&page[start_byte]));
-            const raw = aligned.* >> @intCast(nibble_in_byte << 2);
+            //const aligned: *const Aligned = @alignCast(@ptrCast(&page[start_byte]));
+            const buf = page[start_byte..][0..@sizeOf(Aligned)];
+            const aligned = std.mem.readInt(Aligned, buf, std.builtin.Endian.little);
+            const raw = aligned >> @intCast(nibble_in_byte << 2);
 
             // std.debug.print("get index: {d}, aligned: {x}, raw: {x}, mask: {d}, nib {d}, res: {d}\n", .{ index, aligned.*, raw, mask, nibble_in_byte, res });
 
@@ -98,11 +100,14 @@ pub fn NibbleAligned(comptime OffsetType: type, comptime IndexType: type) type {
             const start_byte = start_nibble / 2;
             const nibble_in_byte = start_nibble % 2;
 
-            const aligned: *Aligned = @alignCast(@ptrCast(&page[start_byte]));
+            //const aligned: *Aligned = @alignCast(@ptrCast(&page[start_byte]));
+            const buf = page[start_byte..][0..@sizeOf(Aligned)];
+            const aligned = std.mem.readInt(Aligned, buf, std.builtin.Endian.little);
             const shift = nibble_in_byte << 2;
-            const raw = aligned.* & ~(mask << @intCast(shift));
+            const raw = aligned & ~(mask << @intCast(shift));
             const shifted_offset: Aligned = @as(Aligned, @intCast(offset)) << @intCast(shift);
-            aligned.* = raw | shifted_offset;
+            //aligned.* = raw | shifted_offset;
+            std.mem.writeInt(Aligned, buf, raw | shifted_offset, std.builtin.Endian.little);
         }
     };
 }
