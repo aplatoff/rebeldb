@@ -29,21 +29,19 @@ pub fn ByteAligned(comptime OffsetType: type, comptime IndexType: type) type {
         const Offset = OffsetType;
         const Index = IndexType;
 
-        inline fn getIndex(capacity: usize, index: Index) usize {
-            return capacity - (index + 1) * @sizeOf(Offset);
-        }
-
         inline fn getIndicesOffset(capacity: usize, len: Index) usize {
             return capacity - len * @sizeOf(Offset);
         }
 
         inline fn getOffset(page: []const u8, index: Index) Offset {
-            const ptr: *const Offset = @alignCast(@ptrCast(&page[getIndex(page.len, index)]));
+            const ofs = page.len - (index + 1) * @sizeOf(Offset);
+            const ptr: *const Offset = @alignCast(@ptrCast(&page[ofs]));
             return ptr.*;
         }
 
         inline fn setOffset(page: []u8, index: Index, offset: Offset) void {
-            const ptr: *Offset = @alignCast(@ptrCast(&page[getIndex(page.len, index)]));
+            const ofs = page.len - (index + 1) * @sizeOf(Offset);
+            const ptr: *Offset = @alignCast(@ptrCast(&page[ofs]));
             ptr.* = offset;
         }
     };
@@ -64,7 +62,7 @@ pub fn NibbleAligned(comptime OffsetType: type, comptime IndexType: type) type {
 
         // TODO: Implement NibbleAligned indexing
 
-        // inline fn getIndicesStart(index0: Offset, len: Index) Offset {
+        // inline fn getIndicesOffset(index0: Offset, len: Index) Offset {
         // }
 
         // inline fn getOffset(page: [*]const u8, index: Index, index0: Offset) Offset {
@@ -88,14 +86,6 @@ pub fn Static(comptime cap: comptime_int) type {
         inline fn capacity(_: Self) usize {
             return cap;
         }
-
-        // inline fn getConstData(_: Self, page: [*]const u8, header_size: comptime_int) []const u8 {
-        //     return page[header_size..capacity];
-        // }
-
-        // inline fn getData(_: Self, page: [*]u8, header_size: comptime_int) []u8 {
-        //     return page[header_size..capacity];
-        // }
     };
 }
 
@@ -112,16 +102,6 @@ pub fn Dynamic(comptime Offset: type) type {
         inline fn capacity(self: Self) usize {
             return @as(usize, @intCast(self.last_byte)) + 1;
         }
-
-        // inline fn getConstData(self: Self, page: [*]const u8, header_size: comptime_int) []const u8 {
-        //     // const capacity = @as(usize, @intCast(self.last_byte)) + 1;
-        //     return page[header_size .. self.last_byte + 1];
-        // }
-
-        // inline fn getData(self: Self, page: [*]u8, header_size: comptime_int) []u8 {
-        //     // const capacity = @as(usize, @intCast(self.last_byte)) + 1;
-        //     return page[header_size .. self.last_byte + 1];
-        // }
     };
 }
 
@@ -227,25 +207,6 @@ pub fn Page(comptime Capacity: type, comptime Indices: type, comptime Mutability
             self.len += 1;
             return page[offset..next];
         }
-
-        // pub fn push(self: *Self, value: []const u8) Index {
-        //     const index = self.len;
-        //     const buf = self.alloc(@intCast(value.len));
-        //     for (0..value.len) |i| buf[i] = value[i];
-        //     return index;
-        // }
-
-        // pub fn push(self: *Self, value: [*]const u8, size: Offset) Index {
-        //     const index = self.len;
-        //     const pos = self.append.push(size);
-        //     self.cap.setOffset(@ptrCast(self), index, pos);
-
-        //     const buf = self.values();
-        //     for (0..size) |i| buf[pos + i] = value[i];
-
-        //     self.len += 1;
-        //     return index;
-        // }
     };
 }
 
