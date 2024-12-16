@@ -211,7 +211,7 @@ pub fn Page(comptime IndexType: type, comptime Capacity: type, comptime Indices:
             return Indices.getIndicesOffset(self.cap.capacity(), index);
         }
 
-        pub inline fn available(self: *Self) Offset {
+        pub fn available(self: *Self) Offset {
             const avail = self.mut.available(@intCast(self.indices(self.len + 1)));
             return if (avail > @sizeOf(Self)) avail - @sizeOf(Self) else 0;
         }
@@ -235,7 +235,7 @@ pub fn Page(comptime IndexType: type, comptime Capacity: type, comptime Indices:
             return page[@sizeOf(Self)..self.cap.capacity()];
         }
 
-        pub inline fn alloc(self: *Self, size: Offset) []u8 {
+        pub fn alloc(self: *Self, size: Offset) []u8 {
             const page = self.values();
             const offset = self.mut.get();
             Indices.setOffset(page, self.len, offset);
@@ -719,6 +719,10 @@ const PageIndex = u16;
 const PageOffset = u16;
 
 const HeapPage = Page(PageIndex, Static(PageSize), ByteAligned(PageOffset), Mutable(PageOffset));
+
+export fn init(page: *HeapPage) void {
+    _ = page.init(PageSize);
+}
 
 export fn get(page: *const HeapPage, index: PageIndex) [*]const u8 {
     return page.get(index);

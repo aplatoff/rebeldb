@@ -101,7 +101,7 @@ fn benchGetStaticNibble_16_u4_u4(_: Allocator) void {
 
 fn benchGetDynamicNibble_16_u4_u8(_: Allocator) void {
     var data = [16]u8{
-        3, 0, // len=3, dynamic last_byte=15 => capacity=16
+        3, 15, // len=3, dynamic last_byte=15 => capacity=16
         'A', 'B', 'C', // values at offset0='A', offset1='B'
         0, 0, 0, 0, 0, 0, 0, 0, 0, // pad
         0x23, 0x01, // nibble indexes: value1 offset=1 nib high, value0 offset=0 nib low

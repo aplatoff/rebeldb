@@ -434,3 +434,8 @@ test "lexicographical ordering - comprehensive" {
         try testing.expectEqual(pair.b, decoded2.value);
     }
 }
+
+export fn encode(buffer: [*]u8, value: u64) usize {
+    const buf = buffer[0..9];
+    return encodeUint64(buf, value);
+}
