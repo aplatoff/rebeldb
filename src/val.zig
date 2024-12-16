@@ -4,7 +4,7 @@ const std = @import("std");
 const page = @import("page.zig");
 
 const Page = page.Page;
-const StaticCapacity = page.StaticCapacity;
+const Static = page.Static;
 const ByteAligned = page.ByteAligned;
 const Mutable = page.Mutable;
 
@@ -35,7 +35,7 @@ pub fn Values(Storage: type) type {
 const testing = std.testing;
 
 const PageSize = 0x10000;
-const StaticPage = Page(StaticCapacity(PageSize, ByteAligned(u16, u16)), Mutable(u16));
+const StaticPage = Page(Static(PageSize), ByteAligned(u16, u16), Mutable(u16));
 const Typed = Values(StaticPage);
 
 test "mutable static bytes u16 u16" {

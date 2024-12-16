@@ -8,8 +8,8 @@ const Allocator = std.mem.Allocator;
 const Order = std.math.Order;
 const assert = std.debug.assert;
 
-const StaticCapacity = pg.StaticCapacity;
-const DynamicCapacity = pg.DynamicCapacity;
+const Static = pg.Static;
+const Dynamic = pg.Dynamic;
 const ByteAligned = pg.ByteAligned;
 const Mutable = pg.Mutable;
 
@@ -22,7 +22,7 @@ pub fn Heap(comptime File: type, Offset: type, Index: type) type {
 
         pub const Object = packed struct { page: PageId, index: Index };
 
-        const Page = pg.Page(StaticCapacity(PageSize, ByteAligned(Offset, Index)), Mutable(Offset));
+        const Page = pg.Page(Static(PageSize), ByteAligned(Offset, Index), Mutable(Offset));
         const PageDescriptor = packed struct { available: Offset, id: PageId };
 
         fn cmpFree(_: void, a: PageDescriptor, b: PageDescriptor) Order {

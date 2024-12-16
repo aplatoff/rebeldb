@@ -8,8 +8,8 @@ const heap = @import("heap.zig");
 
 const Allocator = std.mem.Allocator;
 
-const StaticCapacity = page.StaticCapacity;
-const DynamicCapacity = page.DynamicCapacity;
+const Static = page.Static;
+const Dynamic = page.Dynamic;
 const ByteAligned = page.ByteAligned;
 const Readonly = page.Readonly;
 const Page = page.Page;
@@ -21,8 +21,7 @@ const LARGE_SIZE = 1_000_000;
 
 fn getStaticByte_16_u8_u8() usize {
     const data = [16]u8{ 2, 1, 2, 3, 4, 5, 6, 7, 0, 6, 5, 4, 3, 2, 1, 0 };
-    const StaticBytes = StaticCapacity(16, ByteAligned(u8, u8));
-    const StaticPage = Page(StaticBytes, Readonly(u8));
+    const StaticPage = Page(Static(16), ByteAligned(u8, u8), Readonly(u8));
     const p: *const StaticPage = @alignCast(@ptrCast(&data));
 
     var i: usize = 0;
@@ -39,8 +38,7 @@ fn benchGetStaticByte_16_u8_u8(_: Allocator) void {
 
 fn getDynamicByte_16_u8_u8() usize {
     const data = [16]u8{ 2, 15, 1, 2, 3, 4, 5, 6, 7, 6, 5, 4, 3, 2, 1, 0 };
-    const DynamicBytes = DynamicCapacity(16, ByteAligned(u8, u8));
-    const DynamicPage = Page(DynamicBytes, Readonly(u8));
+    const DynamicPage = Page(Dynamic(u8), ByteAligned(u8, u8), Readonly(u8));
     const p: *const DynamicPage = @alignCast(@ptrCast(&data));
 
     var i: usize = 0;
