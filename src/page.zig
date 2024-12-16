@@ -81,7 +81,7 @@ pub fn NibbleAligned(comptime OffsetType: type, comptime IndexType: type) type {
             const nibble_in_byte = start_nibble % 2;
 
             const aligned: *const Aligned = @alignCast(@ptrCast(&page[start_byte]));
-            const raw = aligned.* >> if (nibble_in_byte == 0) 4 else 0;
+            const raw = aligned.* >> @intCast(nibble_in_byte << 2);
 
             // std.debug.print("get index: {d}, aligned: {x}, raw: {x}, mask: {d}, nib {d}, res: {d}\n", .{ index, aligned.*, raw, mask, nibble_in_byte, res });
 
@@ -99,8 +99,9 @@ pub fn NibbleAligned(comptime OffsetType: type, comptime IndexType: type) type {
             const nibble_in_byte = start_nibble % 2;
 
             const aligned: *Aligned = @alignCast(@ptrCast(&page[start_byte]));
-            const raw = aligned.* & ~(mask << (nibble_in_byte << 2));
-            aligned.* = raw | offset << (nibble_in_byte << 2);
+            const shift = nibble_in_byte << 2;
+            const raw = aligned.* & ~(mask << shift);
+            aligned.* = raw | (offset << shift);
         }
     };
 }
@@ -245,7 +246,7 @@ pub fn Page(comptime Capacity: type, comptime Indices: type, comptime Mutability
 const testing = std.testing;
 
 test "get readonly static nibble u4 u4" {
-    const data = [16]u8{ 0x20, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 5, 0x50 };
+    const data = [16]u8{ 0x20, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 5, 0x05 };
     const StaticPage = Page(Static(16), NibbleAligned(u4, u4), Readonly(u4));
     const static_page: *const StaticPage = @ptrCast(&data);
 
