@@ -24,22 +24,21 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 /// ByteAligned indices -- for Offset values aligned to the byte boundary
-pub fn ByteAligned(comptime OffsetType: type, comptime IndexType: type) type {
+pub fn ByteAligned(comptime OffsetType: type) type {
     return struct {
         const Offset = OffsetType;
-        const Index = IndexType;
 
-        inline fn getIndicesOffset(capacity: usize, len: Index) usize {
+        inline fn getIndicesOffset(capacity: usize, len: usize) usize {
             return capacity - len * @sizeOf(Offset);
         }
 
-        inline fn getOffset(page: []const u8, index: Index) Offset {
+        inline fn getOffset(page: []const u8, index: usize) Offset {
             const ofs = page.len - (index + 1) * @sizeOf(Offset);
             const ptr: *const Offset = @alignCast(@ptrCast(&page[ofs]));
             return ptr.*;
         }
 
-        inline fn setOffset(page: []u8, index: Index, offset: Offset) void {
+        inline fn setOffset(page: []u8, index: usize, offset: Offset) void {
             const ofs = page.len - (index + 1) * @sizeOf(Offset);
             const ptr: *Offset = @alignCast(@ptrCast(&page[ofs]));
             ptr.* = offset;
@@ -48,10 +47,9 @@ pub fn ByteAligned(comptime OffsetType: type, comptime IndexType: type) type {
 }
 
 /// NibbleAligned indices -- for Offset values aligned to four bits
-pub fn NibbleAligned(comptime OffsetType: type, comptime IndexType: type) type {
+pub fn NibbleAligned(comptime OffsetType: type) type {
     return struct {
         const Offset = OffsetType;
-        const Index = IndexType;
 
         comptime {
             if (@bitSizeOf(Offset) % 4 != 0 or @bitSizeOf(Offset) % 8 == 0) {
@@ -66,14 +64,14 @@ pub fn NibbleAligned(comptime OffsetType: type, comptime IndexType: type) type {
         const mask: Aligned = (1 << offset_bits) - 1;
 
         /// Compute the byte offset where the indexing region starts.
-        inline fn getIndicesOffset(capacity: usize, len: Index) usize {
+        inline fn getIndicesOffset(capacity: usize, len: usize) usize {
             const total_nibbles = @as(usize, @intCast(len)) * offset_nibbles;
             const index_bytes = (total_nibbles + 1) / 2;
             return capacity - index_bytes;
         }
 
         /// Get the Offset stored at a given index.
-        inline fn getOffset(page: []const u8, index: Index) Offset {
+        inline fn getOffset(page: []const u8, index: usize) Offset {
             const total_nibbles = page.len * 2;
             const start_nibble = total_nibbles - (index + 1) * offset_nibbles;
 
@@ -93,7 +91,7 @@ pub fn NibbleAligned(comptime OffsetType: type, comptime IndexType: type) type {
         // 8 - 4 3 - 0 .. 8 - 4 3 - 0
 
         /// Set the Offset at a given index.
-        inline fn setOffset(page: []u8, index: Index, offset: Offset) void {
+        inline fn setOffset(page: []u8, index: usize, offset: Offset) void {
             const total_nibbles = page.len * 2;
             const start_nibble = total_nibbles - (index + 1) * offset_nibbles;
 
@@ -185,12 +183,12 @@ pub fn Readonly(comptime Offset: type) type {
 }
 
 /// Page
-pub fn Page(comptime Capacity: type, comptime Indices: type, comptime Mutability: type) type {
+pub fn Page(comptime IndexType: type, comptime Capacity: type, comptime Indices: type, comptime Mutability: type) type {
     return packed struct {
         const Self = @This();
 
         pub const Offset = Indices.Offset;
-        pub const Index = Indices.Index;
+        pub const Index = IndexType;
 
         len: Index,
         cap: Capacity,
@@ -269,7 +267,7 @@ pub fn Page(comptime Capacity: type, comptime Indices: type, comptime Mutability
 // Using u4 as offset is valid for NibbleAligned.
 test "nibble aligned offset compile-time success with u4" {
     // Just instantiate it; if it compiles, it's good.
-    _ = NibbleAligned(u4, u4);
+    _ = NibbleAligned(u4);
     try testing.expect(true);
 }
 
@@ -308,7 +306,7 @@ test "static byte aligned readonly: basic retrieval" {
         0x00,
     };
 
-    const StaticPage = Page(Static(16), ByteAligned(u8, u8), Readonly(u8));
+    const StaticPage = Page(u8, Static(16), ByteAligned(u8), Readonly(u8));
     const page_ptr: *const StaticPage = @ptrCast(&data);
 
     // Validate structure size
@@ -327,7 +325,7 @@ test "static byte aligned mutable: append values" {
     var data = [_]u8{0} ** 32;
 
     // Choose bigger capacity (32 bytes).
-    const StaticPage = Page(Static(32), ByteAligned(u8, u8), Mutable(u8));
+    const StaticPage = Page(u8, Static(32), ByteAligned(u8), Mutable(u8));
     const page_ptr: *StaticPage = @alignCast(@ptrCast(&data));
 
     const avail = page_ptr.init(32);
@@ -422,7 +420,7 @@ test "static nibble aligned readonly: multiple values" {
         0x23, 0x01,
     };
 
-    const StaticPage = Page(Static(16), NibbleAligned(u4, u4), Readonly(u4));
+    const StaticPage = Page(u4, Static(16), NibbleAligned(u4), Readonly(u4));
     const page_ptr: *const StaticPage = @alignCast(@ptrCast(&data));
 
     // Check size
@@ -440,7 +438,7 @@ test "static nibble aligned readonly: multiple values" {
 test "static nibble aligned mutable: append values" {
     var data = [_]u8{0} ** 16;
 
-    const StaticPage = Page(Static(16), NibbleAligned(u4, u4), Mutable(u4));
+    const StaticPage = Page(u4, Static(16), NibbleAligned(u4), Mutable(u4));
     const page_ptr: *StaticPage = @alignCast(@ptrCast(&data));
 
     const avail = page_ptr.init(16);
@@ -471,7 +469,7 @@ test "static nibble aligned mutable: append values" {
 // ---------------------------------------------
 test "dynamic byte aligned mutable: large page" {
     var data = [_]u8{0} ** 1024; // a 1KB page
-    const DynamicPage = Page(Dynamic(u16), ByteAligned(u16, u16), Mutable(u16));
+    const DynamicPage = Page(u16, Dynamic(u16), ByteAligned(u16), Mutable(u16));
     const page_ptr: *DynamicPage = @alignCast(@ptrCast(&data));
 
     const avail = page_ptr.init(1024);
@@ -504,7 +502,7 @@ test "dynamic byte aligned mutable: large page" {
 // ---------------------------------------------
 test "readonly page cannot alloc" {
     var data = [_]u8{0} ** 16;
-    const ReadOnlyPage = Page(Static(16), ByteAligned(u8, u8), Readonly(u8));
+    const ReadOnlyPage = Page(u8, Static(16), ByteAligned(u8), Readonly(u8));
     const page_ptr: *ReadOnlyPage = @alignCast(@ptrCast(&data));
 
     _ = page_ptr.init(16);
@@ -516,7 +514,7 @@ test "readonly page cannot alloc" {
     // val[0] = 0xAA; // This would fail at runtime.
     //
     // Just check that available() returns 0
-    try testing.expectEqual(@as(u8, 0), page_ptr.available());
+    try testing.expectEqual(0, page_ptr.available());
 }
 
 // ---------------------------------------------
@@ -527,7 +525,7 @@ test "verify no overlap for multiple allocations" {
     // We'll allocate small chunks until we approach the indexing region and check final layout.
 
     var data = [_]u8{0} ** 64;
-    const StaticPage = Page(Static(64), ByteAligned(u8, u8), Mutable(u8));
+    const StaticPage = Page(u8, Static(64), ByteAligned(u8), Mutable(u8));
     const page_ptr: *StaticPage = @alignCast(@ptrCast(&data));
 
     _ = page_ptr.init(64);
@@ -551,8 +549,8 @@ test "verify no overlap for multiple allocations" {
 
     // Check last inserted value correctness
     const last_val = page_ptr.get(4);
-    try testing.expectEqual(@as(u8, 80), last_val[0]); // i=4 => 4*20=80
-    try testing.expectEqual(@as(u8, 81), last_val[1]);
+    try testing.expectEqual(80, last_val[0]); // i=4 => 4*20=80
+    try testing.expectEqual(81, last_val[1]);
 }
 
 test "static nibble aligned u12 offsets: append multiple values" {
@@ -562,7 +560,7 @@ test "static nibble aligned u12 offsets: append multiple values" {
 
     // Use NibbleAligned(u12, u8) and Mutable(u12) to allow appends.
     // Using u8 as Index is fine for a small number of values.
-    const StaticPage = Page(Static(64), NibbleAligned(u12, u8), Mutable(u12));
+    const StaticPage = Page(u8, Static(64), NibbleAligned(u12), Mutable(u12));
     const page_ptr: *StaticPage = @alignCast(@ptrCast(&data));
 
     // Initialize the page.
@@ -623,7 +621,7 @@ test "static nibble aligned u12 offsets: boundary conditions with small values" 
     // Test minimal allocations and indexing near the start.
     var data = [_]u8{0} ** 32;
 
-    const StaticPage = Page(Static(32), NibbleAligned(u12, u8), Mutable(u12));
+    const StaticPage = Page(u8, Static(32), NibbleAligned(u12), Mutable(u12));
     const page_ptr: *StaticPage = @alignCast(@ptrCast(&data));
 
     _ = page_ptr.init(32);
@@ -655,7 +653,7 @@ test "static nibble aligned u12 offsets: multiple medium-sized values" {
     // - Value2 starts at offset 35 and is 25 bytes long
     //
     // Total values = 60 bytes. Indices: 3 * 12 bits = 36 bits = 4.5 bytes, so 5 bytes indexing.
-    const StaticPage = Page(Static(128), NibbleAligned(u12, u8), Mutable(u12));
+    const StaticPage = Page(u8, Static(128), NibbleAligned(u12), Mutable(u12));
     const page_ptr: *StaticPage = @alignCast(@ptrCast(&data));
     _ = page_ptr.init(128);
 
@@ -686,7 +684,7 @@ test "dynamic nibble aligned u12 offsets: multiple values" {
     // Test a dynamic page with nibble-aligned u12 offsets.
     // We'll use a 512-byte page and store multiple values.
     var data = [_]u8{0} ** 512;
-    const DynamicPage = Page(Dynamic(u12), NibbleAligned(u12, u8), Mutable(u12));
+    const DynamicPage = Page(u8, Dynamic(u12), NibbleAligned(u12), Mutable(u12));
     const page_ptr: *DynamicPage = @alignCast(@ptrCast(&data));
 
     const avail = page_ptr.init(512);
@@ -720,7 +718,7 @@ const PageSize = 0x10000;
 const PageIndex = u16;
 const PageOffset = u16;
 
-const HeapPage = Page(Static(PageSize), ByteAligned(PageOffset, PageIndex), Mutable(PageOffset));
+const HeapPage = Page(PageIndex, Static(PageSize), ByteAligned(PageOffset), Mutable(PageOffset));
 
 export fn get(page: *const HeapPage, index: PageIndex) [*]const u8 {
     return page.get(index);
@@ -734,7 +732,7 @@ export fn available(page: *HeapPage) PageOffset {
     return page.available();
 }
 
-const NibblePage = Page(Static(4096), NibbleAligned(u12, u12), Mutable(u12));
+const NibblePage = Page(u8, Static(4096), NibbleAligned(u12), Mutable(u12));
 
 export fn nibbleGet(page: *const NibblePage, index: usize) [*]const u8 {
     return page.get(@intCast(index));

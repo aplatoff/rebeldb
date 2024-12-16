@@ -23,7 +23,7 @@ const LARGE_SIZE = 1_000_000;
 
 fn benchGetStaticByte_16_u8_u8(_: Allocator) void {
     const data = [16]u8{ 2, 1, 2, 3, 4, 5, 6, 7, 0, 6, 5, 4, 3, 2, 1, 0 };
-    const StaticPage = Page(Static(16), ByteAligned(u8, u8), Readonly(u8));
+    const StaticPage = Page(u8, Static(16), ByteAligned(u8), Readonly(u8));
     const p: *const StaticPage = @alignCast(@ptrCast(&data));
 
     var sum: usize = 0;
@@ -35,7 +35,7 @@ fn benchGetStaticByte_16_u8_u8(_: Allocator) void {
 
 fn benchGetDynamicByte_16_u8_u8(_: Allocator) void {
     const data = [16]u8{ 2, 15, 1, 2, 3, 4, 5, 6, 7, 6, 5, 4, 3, 2, 1, 0 };
-    const DynamicPage = Page(Dynamic(u8), ByteAligned(u8, u8), Readonly(u8));
+    const DynamicPage = Page(u8, Dynamic(u8), ByteAligned(u8), Readonly(u8));
     const p: *const DynamicPage = @alignCast(@ptrCast(&data));
 
     var sum: usize = 0;
@@ -89,7 +89,7 @@ fn benchGetStaticNibble_16_u4_u4(_: Allocator) void {
         0x01,
     };
 
-    const StaticPage = Page(Static(16), NibbleAligned(u4, u8), Readonly(u4));
+    const StaticPage = Page(u8, Static(16), NibbleAligned(u4), Readonly(u4));
     const p: *const StaticPage = @alignCast(@ptrCast(&data));
 
     var sum: usize = 0;
@@ -107,7 +107,7 @@ fn benchGetDynamicNibble_16_u4_u8(_: Allocator) void {
         0x23, 0x01, // nibble indexes: value1 offset=1 nib high, value0 offset=0 nib low
     };
 
-    const DynamicPage = Page(Dynamic(u8), NibbleAligned(u4, u8), Readonly(u4));
+    const DynamicPage = Page(u8, Dynamic(u4), NibbleAligned(u4), Readonly(u4));
     const p: *const DynamicPage = @alignCast(@ptrCast(&data));
 
     var sum: usize = 0;
@@ -129,7 +129,7 @@ fn benchGetDynamicNibble_16_u4_u8(_: Allocator) void {
 fn benchAppendValuesByteAligned(_: Allocator) void {
     const PageSize = 4096;
     var data = [_]u8{0} ** PageSize;
-    const PageType = Page(Static(PageSize), ByteAligned(u16, u16), Mutable(u16));
+    const PageType = Page(u16, Static(PageSize), ByteAligned(u16), Mutable(u16));
     var p: *PageType = @alignCast(@ptrCast(&data));
     _ = p.init(PageSize); // Initialize page
 
@@ -146,7 +146,7 @@ fn benchAppendValuesByteAligned(_: Allocator) void {
 fn benchAppendValuesNibbleAligned(_: Allocator) void {
     const PageSize = 4096;
     var data = [_]u8{0} ** PageSize;
-    const PageType = Page(Static(PageSize), NibbleAligned(u12, u16), Mutable(u12));
+    const PageType = Page(u12, Static(PageSize), NibbleAligned(u12), Mutable(u12));
     var p: *PageType = @alignCast(@ptrCast(&data));
     _ = p.init(PageSize); // Initialize page
 
@@ -184,8 +184,8 @@ pub fn main() !void {
     try suite.add("Get Dynamic Nibble 16 u4 u8", benchGetDynamicNibble_16_u4_u8, .{});
 
     // New Mutable Append Benchmarks
-    try suite.add("Append Values ByteAligned 64K", benchAppendValuesByteAligned, .{});
-    try suite.add("Append Values NibbleAligned 64K", benchAppendValuesNibbleAligned, .{});
+    try suite.add("apnd stat byte u16 4K", benchAppendValuesByteAligned, .{});
+    try suite.add("apnd stat nibble u12 4K", benchAppendValuesNibbleAligned, .{});
 
     const stdout = std.io.getStdOut().writer();
     try suite.run(stdout);

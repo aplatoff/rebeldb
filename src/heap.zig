@@ -22,7 +22,7 @@ pub fn Heap(comptime File: type, Offset: type, Index: type) type {
 
         pub const Object = packed struct { page: PageId, index: Index };
 
-        const Page = pg.Page(Static(PageSize), ByteAligned(Offset, Index), Mutable(Offset));
+        const Page = pg.Page(Index, Static(PageSize), ByteAligned(Offset), Mutable(Offset));
         const PageDescriptor = packed struct { available: Offset, id: PageId };
 
         fn cmpFree(_: void, a: PageDescriptor, b: PageDescriptor) Order {
