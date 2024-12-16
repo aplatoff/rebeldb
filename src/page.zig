@@ -54,12 +54,16 @@ pub fn NibbleAligned(comptime OffsetType: type, comptime IndexType: type) type {
         const Index = IndexType;
 
         comptime {
-            if (@bitSizeOf(Offset) % 4 != 0) {
-                @compileError("Offset bit-size must be a multiple of 4 for NibbleAligned indexing");
+            if (@bitSizeOf(Offset) % 4 != 0 or @bitSizeOf(Offset) % 8 == 0) {
+                @compileError("Offset bit-size must be a multiple of 4 for NibbleAligned indexing and not a multiple of 8");
             }
         }
 
-        const offset_nibbles = @bitSizeOf(Offset) / 4;
+        const offset_bits = @bitSizeOf(Offset);
+        const Aligned = @Type(.{ .Int = .{ .signedness = .unsigned, .bits = offset_bits + 4 } });
+
+        const offset_nibbles = offset_bits / 4;
+        const mask: Aligned = (1 << offset_bits) - 1;
 
         /// Compute the byte offset where the indexing region starts.
         inline fn getIndicesOffset(capacity: usize, len: Index) usize {
@@ -68,48 +72,35 @@ pub fn NibbleAligned(comptime OffsetType: type, comptime IndexType: type) type {
             return capacity - index_bytes;
         }
 
-        /// Get a nibble (4 bits) from the page given a nibble index (0-based from the front).
-        inline fn getNibble(page: []const u8, nib_idx: usize) u4 {
-            const byte_idx = nib_idx / 2;
-            const in_byte_pos = nib_idx % 2; // 0 = high nibble, 1 = low nibble
-            const byte_val = page[byte_idx];
-            return @intCast(if (in_byte_pos == 0) (byte_val >> 4) & 0xF else byte_val & 0xF);
-        }
-
-        /// Set a nibble (4 bits) in the page at a given nibble index.
-        inline fn setNibble(page: []u8, nib_idx: usize, nib: u4) void {
-            const byte_idx = nib_idx / 2;
-            const in_byte_pos = nib_idx % 2;
-
-            const old_byte = page[byte_idx];
-            const mask = if (in_byte_pos == 0) u8(0x0F) else u8(0xF0);
-            const shifted_nib = if (in_byte_pos == 0) @as(u8, nib << 4) else @as(u8, nib);
-
-            page[byte_idx] = (old_byte & mask) | shifted_nib;
-        }
-
         /// Get the Offset stored at a given index.
         inline fn getOffset(page: []const u8, index: Index) Offset {
             const total_nibbles = page.len * 2;
             const start_nibble = total_nibbles - (index + 1) * offset_nibbles;
 
-            var offset: usize = 0;
-            inline for (0..offset_nibbles) |i| {
-                offset = (offset << 4) | getNibble(page, start_nibble + i);
-            }
-            return @intCast(offset);
+            const start_byte = start_nibble / 2;
+            const nibble_in_byte = start_nibble % 2;
+
+            const aligned: *const Aligned = @alignCast(@ptrCast(&page[start_byte]));
+            const raw = aligned.* >> if (nibble_in_byte == 0) 4 else 0;
+
+            // std.debug.print("get index: {d}, aligned: {x}, raw: {x}, mask: {d}, nib {d}, res: {d}\n", .{ index, aligned.*, raw, mask, nibble_in_byte, res });
+
+            return @intCast(raw & mask);
         }
+
+        // 8 - 4 3 - 0 .. 8 - 4 3 - 0
 
         /// Set the Offset at a given index.
         inline fn setOffset(page: []u8, index: Index, offset: Offset) void {
             const total_nibbles = page.len * 2;
             const start_nibble = total_nibbles - (index + 1) * offset_nibbles;
 
-            for (offset_nibbles) |i| {
-                const shift_bits = (@as(u32, offset_nibbles - 1 - i)) * 4;
-                const nib = @as(u4, (offset >> shift_bits) & 0xF);
-                setNibble(page, start_nibble + i, nib);
-            }
+            const start_byte = start_nibble / 2;
+            const nibble_in_byte = start_nibble % 2;
+
+            const aligned: *Aligned = @alignCast(@ptrCast(&page[start_byte]));
+            const raw = aligned.* & ~(mask << (nibble_in_byte << 2));
+            aligned.* = raw | offset << (nibble_in_byte << 2);
         }
     };
 }
