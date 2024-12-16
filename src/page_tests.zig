@@ -4,15 +4,15 @@
 
 const std = @import("std");
 const testing = std.testing;
-const page = @import("page.zig");
+const pg = @import("page.zig");
 
-const Page = page.Page; // Adjust if needed
-const ByteAligned = page.ByteAligned;
-const NibbleAligned = page.NibbleAligned;
-const Static = page.Static;
-const Dynamic = page.Dynamic;
-const Mutable = page.Mutable;
-const Readonly = page.Readonly;
+const Page = pg.Page; // Adjust if needed
+const ByteAligned = pg.ByteAligned;
+const NibbleAligned = pg.NibbleAligned;
+const Static = pg.Static;
+const Dynamic = pg.Dynamic;
+const Mutable = pg.Mutable;
+const Readonly = pg.Readonly;
 
 // ---------------------------------------------
 // Compile-time checks for NibbleAligned
@@ -95,8 +95,8 @@ test "static byte aligned mutable: append values" {
     const StaticPage = Page(Static(32), ByteAligned(u8, u8), Mutable(u8));
     const page_ptr: *StaticPage = @alignCast(@ptrCast(&data));
 
-    const available = page_ptr.init(32);
-    try testing.expectEqual(@as(u8, 32 - @sizeOf(StaticPage) - @sizeOf(u8)), available);
+    const avail = page_ptr.init(32);
+    try testing.expectEqual(@as(u8, 32 - @sizeOf(StaticPage) - @sizeOf(u8)), avail);
 
     // Append a value of 3 bytes
     const val1 = page_ptr.alloc(3);
@@ -376,4 +376,129 @@ test "static nibble aligned u12 offsets: append multiple values" {
     try testing.expectEqual(64 - used, page_ptr.available());
 
     // Everything retrieved matches what we wrote, so nibble-aligned indexing with u12 offsets works.
+}
+
+test "static nibble aligned u12 offsets: boundary conditions with small values" {
+    // Test minimal allocations and indexing near the start.
+    var data = [_]u8{0} ** 32;
+
+    const StaticPage = Page(Static(32), NibbleAligned(u12, u8), Mutable(u12));
+    const page_ptr: *StaticPage = @alignCast(@ptrCast(&data));
+
+    _ = page_ptr.init(32);
+
+    // Allocate a small value at offset 0
+    const val0 = page_ptr.alloc(@as(u12, 1));
+    val0[0] = 0xAB;
+    try testing.expectEqual(0xAB, page_ptr.get(0)[0]);
+
+    // Allocate a second small value (2 bytes)
+    const val1 = page_ptr.alloc(2);
+    val1[0] = 0xCD;
+    val1[1] = 0xEF;
+    try testing.expectEqual(0xCD, page_ptr.get(1)[0]);
+    try testing.expectEqual(0xEF, page_ptr.get(1)[1]);
+
+    // Check count and availability
+    try testing.expectEqual(2, page_ptr.count());
+    try testing.expectEqual(32 - @sizeOf(StaticPage) - 3 - 5, page_ptr.available());
+}
+
+test "static nibble aligned u12 offsets: multiple medium-sized values" {
+    // Test appending values that cause offset to exceed one-byte boundaries in indexing.
+    var data = [_]u8{0} ** 128;
+
+    // We'll store 3 values:
+    // - Value0 starts at offset 0 and is 20 bytes long
+    // - Value1 starts at offset 20 and is 15 bytes long
+    // - Value2 starts at offset 35 and is 25 bytes long
+    //
+    // Total values = 60 bytes. Indices: 3 * 12 bits = 36 bits = 4.5 bytes, so 5 bytes indexing.
+    const StaticPage = Page(Static(128), NibbleAligned(u12, u8), Mutable(u12));
+    const page_ptr: *StaticPage = @alignCast(@ptrCast(&data));
+    _ = page_ptr.init(128);
+
+    const val0 = page_ptr.alloc(20);
+    for (val0, 0..) |*b, i| b.* = @intCast(i);
+    try testing.expectEqual(19, page_ptr.get(0)[19]);
+
+    const val1 = page_ptr.alloc(15);
+    for (val1, 0..) |*b, i| b.* = @intCast(i + 100);
+    try testing.expectEqual(100, page_ptr.get(1)[0]);
+    try testing.expectEqual(114, page_ptr.get(1)[14]);
+
+    const val2 = page_ptr.alloc(25);
+    for (val2, 0..) |*b, i| b.* = @intCast(i + 200);
+    try testing.expectEqual(200, page_ptr.get(2)[0]);
+    try testing.expectEqual(224, page_ptr.get(2)[24]);
+
+    // Verify count
+    try testing.expectEqual(3, page_ptr.count());
+
+    // Check availability after large allocations:
+    // Used = struct size + @sizeOf(u12) for mut + 20+15+25=60 bytes values + ~5 bytes indexing = ~67 + overhead
+    // Just ensure we still have some space left
+    try testing.expect(page_ptr.available() > 40);
+}
+
+test "dynamic nibble aligned u12 offsets: multiple values" {
+    // Test a dynamic page with nibble-aligned u12 offsets.
+    // We'll use a 512-byte page and store multiple values.
+    var data = [_]u8{0} ** 512;
+    const DynamicPage = Page(Dynamic(u12), NibbleAligned(u12, u8), Mutable(u12));
+    const page_ptr: *DynamicPage = @alignCast(@ptrCast(&data));
+
+    const avail = page_ptr.init(512);
+    // Just a sanity check to ensure some initial availability
+    try testing.expect(avail > 400);
+
+    // Store 8 values of 10 bytes each = 80 bytes total
+    for (0..8) |i| {
+        const val = page_ptr.alloc(10);
+        for (val, 0..) |*b, idx| b.* = @intCast(i * 10 + idx);
+    }
+
+    // Verify retrieval
+    for (0..8) |i| {
+        const got = page_ptr.get(@intCast(i));
+        try testing.expectEqual(@as(u8, @intCast(i * 10)), got[0]);
+        try testing.expectEqual(@as(u8, @intCast(i * 10 + 9)), got[9]);
+    }
+
+    // Check availability after 80 bytes + indexes:
+    // 8 values = 8 * 12 bits = 96 bits = 12 bytes indexing + metadata
+    // Used ~= @sizeOf(DynamicPage) + @sizeOf(u12) + 80 + 12
+    // This should be well under 512, so still plenty available.
+    try testing.expect(page_ptr.available() > 400 - 80 - 20);
+}
+
+// for assemly generation
+// zig build-lib -O ReleaseSmall -femit-asm=page.asm src/page.zig
+
+const PageSize = 0x10000;
+const PageIndex = u16;
+const PageOffset = u16;
+
+const HeapPage = Page(Static(PageSize), ByteAligned(PageOffset, PageIndex), Mutable(PageOffset));
+
+export fn get(page: *const HeapPage, index: PageIndex) [*]const u8 {
+    return page.get(index);
+}
+
+export fn alloc(page: *HeapPage, size: PageOffset) *u8 {
+    return &page.alloc(size)[0];
+}
+
+export fn available(page: *HeapPage) PageOffset {
+    return page.available();
+}
+
+const NibblePage = Page(Static(4096), NibbleAligned(u12, u12), Mutable(u12));
+
+export fn nibbleGet(page: *const NibblePage, index: usize) [*]const u8 {
+    return page.get(@intCast(index));
+}
+
+export fn nibbleAlloc(page: *NibblePage, size: usize) *u8 {
+    return &page.alloc(@intCast(size))[0];
 }
