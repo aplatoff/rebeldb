@@ -58,18 +58,59 @@ pub fn NibbleAligned(comptime OffsetType: type, comptime IndexType: type) type {
                 @compileError("Offset bit-size must be a multiple of 4 for NibbleAligned indexing");
             }
         }
+
         const offset_nibbles = @bitSizeOf(Offset) / 4;
 
-        // TODO: Implement NibbleAligned indexing
+        /// Compute the byte offset where the indexing region starts.
+        inline fn getIndicesOffset(capacity: usize, len: Index) usize {
+            const total_nibbles = @as(usize, @intCast(len)) * offset_nibbles;
+            const index_bytes = (total_nibbles + 1) / 2;
+            return capacity - index_bytes;
+        }
 
-        // inline fn getIndicesOffset(index0: Offset, len: Index) Offset {
-        // }
+        /// Get a nibble (4 bits) from the page given a nibble index (0-based from the front).
+        inline fn getNibble(page: []const u8, nib_idx: usize) u4 {
+            const byte_idx = nib_idx / 2;
+            const in_byte_pos = nib_idx % 2; // 0 = high nibble, 1 = low nibble
+            const byte_val = page[byte_idx];
+            return @intCast(if (in_byte_pos == 0) (byte_val >> 4) & 0xF else byte_val & 0xF);
+        }
 
-        // inline fn getOffset(page: [*]const u8, index: Index, index0: Offset) Offset {
-        // }
+        /// Set a nibble (4 bits) in the page at a given nibble index.
+        inline fn setNibble(page: []u8, nib_idx: usize, nib: u4) void {
+            const byte_idx = nib_idx / 2;
+            const in_byte_pos = nib_idx % 2;
 
-        // inline fn setOffset(page: [*]u8, index: Index, offset: Offset, index0: Offset) void {
-        // }
+            const old_byte = page[byte_idx];
+            const mask = if (in_byte_pos == 0) u8(0x0F) else u8(0xF0);
+            const shifted_nib = if (in_byte_pos == 0) @as(u8, nib << 4) else @as(u8, nib);
+
+            page[byte_idx] = (old_byte & mask) | shifted_nib;
+        }
+
+        /// Get the Offset stored at a given index.
+        inline fn getOffset(page: []const u8, index: Index) Offset {
+            const total_nibbles = page.len * 2;
+            const start_nibble = total_nibbles - (index + 1) * offset_nibbles;
+
+            var offset: usize = 0;
+            inline for (0..offset_nibbles) |i| {
+                offset = (offset << 4) | getNibble(page, start_nibble + i);
+            }
+            return @intCast(offset);
+        }
+
+        /// Set the Offset at a given index.
+        inline fn setOffset(page: []u8, index: Index, offset: Offset) void {
+            const total_nibbles = page.len * 2;
+            const start_nibble = total_nibbles - (index + 1) * offset_nibbles;
+
+            for (offset_nibbles) |i| {
+                const shift_bits = (@as(u32, offset_nibbles - 1 - i)) * 4;
+                const nib = @as(u4, (offset >> shift_bits) & 0xF);
+                setNibble(page, start_nibble + i, nib);
+            }
+        }
     };
 }
 
@@ -212,6 +253,16 @@ pub fn Page(comptime Capacity: type, comptime Indices: type, comptime Mutability
 
 const testing = std.testing;
 
+test "get readonly static nibble u4 u4" {
+    const data = [16]u8{ 0x20, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 5, 0x50 };
+    const StaticPage = Page(Static(16), NibbleAligned(u4, u4), Readonly(u4));
+    const static_page: *const StaticPage = @ptrCast(&data);
+
+    try testing.expectEqual(1, @sizeOf(StaticPage));
+    try testing.expectEqual(@as(u8, 1), static_page.get(0)[0]);
+    try testing.expectEqual(@as(u8, 6), static_page.get(1)[0]);
+}
+
 test "get readonly static bytes u8 u8" {
     const data = [16]u8{ 2, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 5, 0 };
     const StaticPage = Page(Static(16), ByteAligned(u8, u8), Readonly(u8));
@@ -270,4 +321,10 @@ export fn alloc(page: *HeapPage, size: PageOffset) [*]const u8 {
 
 export fn available(page: *HeapPage) PageOffset {
     return page.available();
+}
+
+const NibblePage = Page(Static(4096), NibbleAligned(u12, u12), Readonly(u12));
+
+export fn nibbleGet(page: *const NibblePage, index: usize) [*]const u8 {
+    return page.get(@intCast(index));
 }
