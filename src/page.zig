@@ -309,20 +309,20 @@ export fn get(page: *const HeapPage, index: PageIndex) [*]const u8 {
     return page.get(index);
 }
 
-// export fn push(page: *HeapPage, value: [*]const u8, size: PageOffset) void {
-//     _ = page.push(value[0..size]);
-// }
-
-export fn alloc(page: *HeapPage, size: PageOffset) [*]const u8 {
-    return @ptrCast(&page.alloc(size));
+export fn alloc(page: *HeapPage, size: PageOffset) *u8 {
+    return &page.alloc(size)[0];
 }
 
 export fn available(page: *HeapPage) PageOffset {
     return page.available();
 }
 
-const NibblePage = Page(Static(4096), NibbleAligned(u12, u12), Readonly(u12));
+const NibblePage = Page(Static(4096), NibbleAligned(u12, u12), Mutable(u12));
 
 export fn nibbleGet(page: *const NibblePage, index: usize) [*]const u8 {
     return page.get(@intCast(index));
+}
+
+export fn nibbleAlloc(page: *NibblePage, size: usize) *u8 {
+    return &page.alloc(@intCast(size))[0];
 }
