@@ -122,6 +122,21 @@ pub fn bytesNeeded(value: u64) usize {
     return 9;
 }
 
+/// Determines the total size of an encoded value from its first byte.
+///
+/// This function allows quick determination of an encoded value's length
+/// without needing to decode the entire value. This is particularly useful
+/// when reading through a stream of encoded values.
+///
+/// Performance considerations:
+/// - Single byte inspection only
+/// - Constant time operation
+/// - No memory allocation
+///
+/// Args:
+///     first_byte: The first byte of an encoded value
+///
+/// Returns: Total number of bytes in the encoded value (1-9), or 0 if invalid
 pub fn encodedSize(first_byte: u8) usize {
     if (first_byte <= 0xF0) return 1;
     if (first_byte <= 0xF8) return 2;

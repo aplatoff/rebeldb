@@ -81,4 +81,39 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_exe_unit_tests.step);
+
+    // Add example executables
+    const basic_usage = b.addExecutable(.{
+        .name = "basic_usage",
+        .root_source_file = b.path("docs/examples/basic_usage.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    basic_usage.root_module.addImport("rebeldb", &lib.root_module);
+
+    const page_config = b.addExecutable(.{
+        .name = "page_config",
+        .root_source_file = b.path("docs/examples/page_configuration.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    page_config.root_module.addImport("rebeldb", &lib.root_module);
+
+    const mem_mgmt = b.addExecutable(.{
+        .name = "mem_mgmt",
+        .root_source_file = b.path("docs/examples/memory_management.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    mem_mgmt.root_module.addImport("rebeldb", &lib.root_module);
+
+    // Add examples step
+    const examples_step = b.step("examples", "Build example executables");
+    const basic_usage_install = b.addInstallArtifact(basic_usage, .{});
+    const page_config_install = b.addInstallArtifact(page_config, .{});
+    const mem_mgmt_install = b.addInstallArtifact(mem_mgmt, .{});
+
+    examples_step.dependOn(&basic_usage_install.step);
+    examples_step.dependOn(&page_config_install.step);
+    examples_step.dependOn(&mem_mgmt_install.step);
 }
