@@ -3,16 +3,17 @@
 //! storing values, and retrieving data.
 
 const std = @import("std");
-const Page = @import("page.zig").Page;
-const ByteAligned = @import("page.zig").ByteAligned;
-const Static = @import("page.zig").Static;
-const Mutable = @import("page.zig").Mutable;
+const rebeldb = @import("rebeldb");
+const Page = rebeldb.Page;
+const ByteAligned = rebeldb.ByteAligned;
+const Static = rebeldb.Static;
+const Mutable = rebeldb.Mutable;
 
 pub fn main() !void {
     // Create a simple page with 128 bytes capacity
     var data: [128]u8 = undefined;
     const BasicPage = Page(u8, Static(128), ByteAligned(u8), Mutable(u8));
-    var page: *BasicPage = @ptrCast(&data);
+    var page: *BasicPage = @ptrCast(@alignCast(&data));
 
     // Initialize the page
     _ = page.init(128);

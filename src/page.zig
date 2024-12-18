@@ -329,10 +329,7 @@ pub fn Page(comptime IndexType: type, comptime Capacity: type, comptime Indices:
         }
     };
 }
-}
 
-// ---------------------------------------------
-// Compile-time checks for NibbleAligned
 // ---------------------------------------------
 
 // NibbleAligned requires OffsetType bit-size multiple of 4 but not multiple of 8.

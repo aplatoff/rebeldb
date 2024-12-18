@@ -2,13 +2,14 @@
 //! This file demonstrates different page configurations and their use cases.
 
 const std = @import("std");
-const Page = @import("page.zig").Page;
-const ByteAligned = @import("page.zig").ByteAligned;
-const NibbleAligned = @import("page.zig").NibbleAligned;
-const Static = @import("page.zig").Static;
-const Dynamic = @import("page.zig").Dynamic;
-const Mutable = @import("page.zig").Mutable;
-const Readonly = @import("page.zig").Readonly;
+const rebeldb = @import("rebeldb");
+const Page = rebeldb.Page;
+const ByteAligned = rebeldb.ByteAligned;
+const NibbleAligned = rebeldb.NibbleAligned;
+const Static = rebeldb.Static;
+const Dynamic = rebeldb.Dynamic;
+const Mutable = rebeldb.Mutable;
+const Readonly = rebeldb.Readonly;
 
 // 1. Static page with byte-aligned indices
 const StaticBytePage = Page(
@@ -37,16 +38,16 @@ const ReadonlyPage = Page(
 pub fn main() !void {
     // Example 1: Static byte-aligned page
     var static_data: [4096]u8 = undefined;
-    var static_page: *StaticBytePage = @ptrCast(&static_data);
+    var static_page: *StaticBytePage = @ptrCast(@alignCast(&static_data));
     _ = static_page.init(4096);
 
     // Example 2: Dynamic nibble-aligned page
     var dynamic_data: [8192]u8 = undefined;
-    var dynamic_page: *DynamicNibblePage = @ptrCast(&dynamic_data);
+    var dynamic_page: *DynamicNibblePage = @ptrCast(@alignCast(&dynamic_data));
     _ = dynamic_page.init(8192);
 
     // Example 3: Readonly page
     var readonly_data: [1024]u8 = undefined;
-    var readonly_page: *ReadonlyPage = @ptrCast(&readonly_data);
+    var readonly_page: *ReadonlyPage = @ptrCast(@alignCast(&readonly_data));
     _ = readonly_page.init(1024);
 }

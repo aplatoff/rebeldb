@@ -2,10 +2,11 @@
 //! This file demonstrates efficient memory usage patterns and techniques.
 
 const std = @import("std");
-const Page = @import("page.zig").Page;
-const ByteAligned = @import("page.zig").ByteAligned;
-const Static = @import("page.zig").Static;
-const Mutable = @import("page.zig").Mutable;
+const rebeldb = @import("rebeldb");
+const Page = rebeldb.Page;
+const ByteAligned = rebeldb.ByteAligned;
+const Static = rebeldb.Static;
+const Mutable = rebeldb.Mutable;
 
 // Define a page optimized for memory efficiency
 const MemoryEfficientPage = Page(
@@ -18,7 +19,7 @@ const MemoryEfficientPage = Page(
 pub fn main() !void {
     // Allocate page memory
     var data: [65536]u8 = undefined;
-    var page: *MemoryEfficientPage = @ptrCast(&data);
+    var page: *MemoryEfficientPage = @ptrCast(@alignCast(&data));
 
     // Initialize with full capacity
     const initial_space = page.init(65536);
