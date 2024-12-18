@@ -4,7 +4,7 @@
     .dependencies = .{
         .zbench = .{
             .url = "https://github.com/hendriknielaender/zbench/archive/main.tar.gz",
-            .hash = "12206252671e6062935e39caccf9cf793cd8d9dd6a2aecede142dd1c87bf4b670c80",
+            .hash = "122095b73930ff5d627429295c669905d85bb9b54394ddc185ad2d61295cc65819e5",
         },
     },
     .paths = .{
