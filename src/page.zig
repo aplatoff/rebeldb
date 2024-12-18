@@ -63,14 +63,12 @@ pub fn NibbleAligned(comptime OffsetType: type) type {
         const offset_nibbles = offset_bits / 4;
         const mask: Aligned = (1 << offset_bits) - 1;
 
-        /// Compute the byte offset where the indexing region starts.
         inline fn getIndicesOffset(capacity: usize, len: usize) usize {
             const total_nibbles = @as(usize, @intCast(len)) * offset_nibbles;
             const index_bytes = (total_nibbles + 1) / 2;
             return capacity - index_bytes;
         }
 
-        /// Get the Offset stored at a given index.
         inline fn getOffset(page: []const u8, index: usize) Offset {
             const total_nibbles = page.len * 2;
             const start_nibble = total_nibbles - (index + 1) * offset_nibbles;
@@ -78,19 +76,13 @@ pub fn NibbleAligned(comptime OffsetType: type) type {
             const start_byte = start_nibble / 2;
             const nibble_in_byte = start_nibble % 2;
 
-            //const aligned: *const Aligned = @alignCast(@ptrCast(&page[start_byte]));
             const buf = page[start_byte..][0..@sizeOf(Aligned)];
             const aligned = std.mem.readInt(Aligned, buf, std.builtin.Endian.little);
             const raw = aligned >> @intCast(nibble_in_byte << 2);
 
-            // std.debug.print("get index: {d}, aligned: {x}, raw: {x}, mask: {d}, nib {d}, res: {d}\n", .{ index, aligned.*, raw, mask, nibble_in_byte, res });
-
             return @intCast(raw & mask);
         }
 
-        // 8 - 4 3 - 0 .. 8 - 4 3 - 0
-
-        /// Set the Offset at a given index.
         inline fn setOffset(page: []u8, index: usize, offset: Offset) void {
             const total_nibbles = page.len * 2;
             const start_nibble = total_nibbles - (index + 1) * offset_nibbles;
@@ -98,20 +90,35 @@ pub fn NibbleAligned(comptime OffsetType: type) type {
             const start_byte = start_nibble / 2;
             const nibble_in_byte = start_nibble % 2;
 
-            //const aligned: *Aligned = @alignCast(@ptrCast(&page[start_byte]));
             const buf = page[start_byte..][0..@sizeOf(Aligned)];
             const aligned = std.mem.readInt(Aligned, buf, std.builtin.Endian.little);
             const shift = nibble_in_byte << 2;
             const raw = aligned & ~(mask << @intCast(shift));
             const shifted_offset: Aligned = @as(Aligned, @intCast(offset)) << @intCast(shift);
-            //aligned.* = raw | shifted_offset;
             std.mem.writeInt(Aligned, buf, raw | shifted_offset, std.builtin.Endian.little);
         }
     };
 }
 
-// Capacity is a type that defines the maximum number of values that can be stored in the page.
-
+/// Capacity configuration that defines a fixed maximum size at compile time.
+///
+/// Static capacity pages have their size determined at compile time, providing
+/// zero runtime overhead for capacity tracking. This configuration is ideal for
+/// scenarios where page sizes are known and consistent.
+///
+/// Performance considerations:
+/// - Zero runtime overhead (no capacity storage)
+/// - No memory overhead beyond page content
+/// - Compile-time size validation
+/// - Best for fixed-size allocations
+///
+/// Example usage:
+/// ```zig
+/// const StaticPage = Page(u8, Static(128), ByteAligned(u8), Mutable(u8));
+/// ```
+///
+/// Args:
+///     cap: Compile-time constant defining page capacity in bytes
 pub fn Static(comptime cap: comptime_int) type {
     return packed struct {
         const Self = @This();
@@ -142,8 +149,25 @@ pub fn Dynamic(comptime Offset: type) type {
     };
 }
 
-// Mutability
-
+/// Mutability configuration that enables write operations.
+///
+/// Mutable pages support both read and write operations, tracking the
+/// current write position and managing available space. This configuration
+/// is necessary for pages that need to accept new values.
+///
+/// Performance considerations:
+/// - Small runtime overhead for position tracking
+/// - Single offset storage overhead
+/// - Enables efficient append operations
+/// - Best for write-heavy workloads
+///
+/// Example usage:
+/// ```zig
+/// const MutablePage = Page(u8, Static(32), ByteAligned(u8), Mutable(u8));
+/// ```
+///
+/// Args:
+///     Offset: Type used for storing position offsets
 pub fn Mutable(comptime Offset: type) type {
     return packed struct {
         const Self = @This();
@@ -164,6 +188,25 @@ pub fn Mutable(comptime Offset: type) type {
     };
 }
 
+/// Mutability configuration that prevents write operations.
+///
+/// Readonly pages only support read operations, providing compile-time
+/// guarantees against modification. This configuration is ideal for
+/// sharing data across threads or preventing accidental modifications.
+///
+/// Performance considerations:
+/// - Zero runtime overhead (no state)
+/// - No memory overhead
+/// - Compile-time write prevention
+/// - Best for concurrent access patterns
+///
+/// Example usage:
+/// ```zig
+/// const ReadonlyPage = Page(u8, Static(16), ByteAligned(u8), Readonly(u8));
+/// ```
+///
+/// Args:
+///     Offset: Type used for offset calculations (though writes are prevented)
 pub fn Readonly(comptime Offset: type) type {
     return packed struct {
         const Self = @This();
@@ -182,7 +225,30 @@ pub fn Readonly(comptime Offset: type) type {
     };
 }
 
-/// Page
+/// Page represents a flexible storage abstraction with configurable behavior.
+///
+/// The Page type provides a memory-efficient storage mechanism with:
+/// - Configurable index type for value references
+/// - Static or dynamic capacity management
+/// - Byte or nibble-aligned index storage
+/// - Mutable or readonly access patterns
+///
+/// Memory Layout:
+/// ┌──────────────┬─────────────────────┬─────────────────┐
+/// │   Header     │    Values           │     Indices     │
+/// │              │    (Growing →)      │    (← Growing)  │
+/// └──────────────┴─────────────────────┴─────────────────┘
+///
+/// Performance considerations:
+/// - Bidirectional growth minimizes fragmentation
+/// - Aligned index access optimizes memory operations
+/// - Flexible configuration enables use-case optimization
+///
+/// Args:
+///     IndexType: Type used for value indexing
+///     Capacity: Static or Dynamic capacity configuration
+///     Indices: ByteAligned or NibbleAligned index storage
+///     Mutability: Readonly or Mutable access configuration
 pub fn Page(comptime IndexType: type, comptime Capacity: type, comptime Indices: type, comptime Mutability: type) type {
     return packed struct {
         const Self = @This();
@@ -195,7 +261,12 @@ pub fn Page(comptime IndexType: type, comptime Capacity: type, comptime Indices:
         mut: Mutability,
         // del: Delete,
 
-        // returns bytes available for writing
+        /// Initialize a new page with the given capacity
+        ///
+        /// Args:
+        ///     capacity: Total size of the page in bytes
+        ///
+        /// Returns: Number of bytes available for writing
         pub fn init(self: *Self, capacity: usize) Offset {
             self.len = 0;
             self.mut = Mutability.init(0);
@@ -203,14 +274,20 @@ pub fn Page(comptime IndexType: type, comptime Capacity: type, comptime Indices:
             return self.available();
         }
 
+        /// Get the current number of values stored in the page
         pub inline fn count(self: Self) Index {
             return self.len;
         }
 
+        /// Calculate the byte offset where indices start for a given index
         inline fn indices(self: *const Self, index: Index) usize {
             return Indices.getIndicesOffset(self.cap.capacity(), index);
         }
 
+        /// Get the number of bytes available for writing
+        ///
+        /// Returns the number of bytes that can be allocated for new values,
+        /// accounting for both value storage and index storage needs.
         pub fn available(self: *Self) Offset {
             const avail = self.mut.available(@intCast(self.indices(self.len + 1)));
             return if (avail > @sizeOf(Self)) avail - @sizeOf(Self) else 0;
@@ -235,6 +312,12 @@ pub fn Page(comptime IndexType: type, comptime Capacity: type, comptime Indices:
             return page[@sizeOf(Self)..self.cap.capacity()];
         }
 
+        /// Allocate space for a new value
+        ///
+        /// Args:
+        ///     size: Number of bytes to allocate
+        ///
+        /// Returns: Slice of allocated memory for writing the value
         pub fn alloc(self: *Self, size: Offset) []u8 {
             const page = self.values();
             const offset = self.mut.get();
@@ -245,6 +328,7 @@ pub fn Page(comptime IndexType: type, comptime Capacity: type, comptime Indices:
             return page[offset..next];
         }
     };
+}
 }
 
 // ---------------------------------------------
